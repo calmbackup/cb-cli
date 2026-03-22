@@ -22,7 +22,7 @@ func NewRootCmd(version string) *cobra.Command {
 	root.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 	root.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "suppress non-error output")
 
-	root.AddCommand(newRunCmd())
+	root.AddCommand(newRunCmd(version))
 	root.AddCommand(newRestoreCmd())
 	root.AddCommand(newListCmd())
 	root.AddCommand(newStatusCmd())

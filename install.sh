@@ -216,28 +216,35 @@ fi
 # --- Done ---
 
 echo
-bold "CalmBackup CLI installed successfully!"
+echo -e "${BOLD}"
+echo '  🪷 CalmBackup'
+echo -e "${NC}"
+bold "  Installed successfully — ${VERSION}"
 echo
-echo "Next steps:"
+echo -e "  ${GREEN}✓${NC} AES-256-GCM encryption — your data is encrypted before"
+echo "    it ever leaves your server. Zero-knowledge: we can't read it."
+echo -e "  ${GREEN}✓${NC} Daily automated backups at 2:00 AM via cron"
+echo -e "  ${GREEN}✓${NC} Local + cloud storage for redundancy"
 echo
-echo -e "  ${BOLD}1. Get your API key${NC} (free account):"
+echo -e "  ${BOLD}Get started:${NC}"
+echo
+echo -e "  ${BOLD}1.${NC} Get your API key ${GREEN}(free)${NC}:"
 echo -e "     ${GREEN}https://app.calmbackup.com/register${NC}"
 echo
 if [ "${MODE}" = "system" ]; then
-    echo "  2. Run the setup wizard:"
+    echo -e "  ${BOLD}2.${NC} Run the setup wizard:"
     echo "     sudo calmbackup init"
 else
-    echo "  2. Run the setup wizard:"
+    echo -e "  ${BOLD}2.${NC} Run the setup wizard:"
     echo "     calmbackup init"
 fi
 echo
-echo "     This will ask for your API key and database credentials,"
-echo "     generate an encryption key, and write the config."
-echo
-echo "  3. Run your first backup:"
+echo -e "  ${BOLD}3.${NC} Run your first backup:"
 echo "     calmbackup run"
 echo
-echo "  That's it. Backups will run automatically every day at 2:00 AM."
+echo "  That's it. Your backups are encrypted, automated, and safe."
+echo
+echo -e "  Docs: ${GREEN}https://calmbackup.com/docs${NC}"
 if [ "${MODE}" = "system" ]; then
     echo "  Logs: journalctl -t calmbackup"
 else
