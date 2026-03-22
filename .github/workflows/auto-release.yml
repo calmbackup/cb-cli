@@ -9,7 +9,20 @@ on:
       - 'LICENSE'
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Run tests
+        run: go test ./...
+
   release:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -29,7 +42,6 @@ jobs:
         id: bump
         run: |
           TAG="${{ steps.latest_tag.outputs.tag }}"
-          # Strip v prefix
           VERSION="${TAG#v}"
           MAJOR=$(echo "$VERSION" | cut -d. -f1)
           MINOR=$(echo "$VERSION" | cut -d. -f2)
@@ -47,9 +59,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
-
-      - name: Run tests
-        run: go test ./...
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6

@@ -25,7 +25,7 @@ func newStatusCmd() *cobra.Command {
 			fmt.Printf("Local backups:  %d (%s)\n", count, formatSize(size))
 			fmt.Printf("Latest backup:  %s\n", latest)
 			fmt.Printf("Local path:     %s\n", svc.Config.LocalPath)
-			fmt.Printf("Retention:      %d days\n", svc.Config.LocalRetentionDays)
+			fmt.Printf("Retention:      %d days\n", svc.Config.RetentionDays)
 
 			// API connectivity
 			fmt.Print("API connection: ")
