@@ -1,0 +1,6 @@
+bin/
+dist/
+*.enc
+*.tar.gz
+calmbackup.yaml
+calmbackup-recovery-key.txt
