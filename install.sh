@@ -220,33 +220,28 @@ bold "CalmBackup CLI installed successfully!"
 echo
 echo "Next steps:"
 echo
-
+echo -e "  ${BOLD}1. Get your API key${NC} (free account):"
+echo -e "     ${GREEN}https://app.calmbackup.com/register${NC}"
+echo
 if [ "${MODE}" = "system" ]; then
-    echo "  1. Edit the config with your credentials:"
-    echo "     sudo nano ${CONFIG_FILE}"
-    echo
-    echo "  2. Or run the interactive setup:"
+    echo "  2. Run the setup wizard:"
     echo "     sudo calmbackup init"
 else
-    echo "  1. Edit the config with your credentials:"
-    echo "     nano ${CONFIG_FILE}"
-    echo
-    echo "  2. Or run the interactive setup:"
+    echo "  2. Run the setup wizard:"
     echo "     calmbackup init"
 fi
-
 echo
-echo "  3. Test connectivity:"
-echo "     calmbackup status"
+echo "     This will ask for your API key and database credentials,"
+echo "     generate an encryption key, and write the config."
 echo
-echo "  4. Run your first backup:"
+echo "  3. Run your first backup:"
 echo "     calmbackup run"
 echo
-echo "  Backups will run automatically every day at 2:00 AM."
+echo "  That's it. Backups will run automatically every day at 2:00 AM."
 if [ "${MODE}" = "system" ]; then
     echo "  Logs: journalctl -t calmbackup"
 else
-    echo "  Logs: journalctl -t calmbackup (or check syslog)"
+    echo "  Logs: journalctl -t calmbackup"
     echo "  Cron: crontab -e"
 fi
 echo
