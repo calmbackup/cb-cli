@@ -4,3 +4,5 @@ dist/
 *.tar.gz
 calmbackup.yaml
 calmbackup-recovery-key.txt
+CLAUDE.md
+/docs/
