@@ -84,16 +84,24 @@ fi
 
 info "Latest version: ${LATEST}"
 
-TARBALL="calmbackup_${LATEST#v}_${OS}_${ARCH}.tar.gz"
-URL="https://github.com/${REPO}/releases/download/${LATEST}/${TARBALL}"
-
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
-info "Downloading ${TARBALL}..."
-if ! curl -sSL "${URL}" -o "${TMP_DIR}/${TARBALL}"; then
+# Try both naming conventions (calmbackup_ for >=v1.0.1, cb-cli_ for v1.0.0)
+DOWNLOADED=false
+for PREFIX in calmbackup cb-cli; do
+    TARBALL="${PREFIX}_${LATEST#v}_${OS}_${ARCH}.tar.gz"
+    URL="https://github.com/${REPO}/releases/download/${LATEST}/${TARBALL}"
+    info "Downloading ${TARBALL}..."
+    if curl -fsSL "${URL}" -o "${TMP_DIR}/${TARBALL}" 2>/dev/null; then
+        DOWNLOADED=true
+        break
+    fi
+done
+
+if [ "${DOWNLOADED}" = false ]; then
     error "Download failed. Check that a release exists for ${OS}/${ARCH}."
-    echo "  URL: ${URL}"
+    echo "  https://github.com/${REPO}/releases"
     exit 1
 fi
 
