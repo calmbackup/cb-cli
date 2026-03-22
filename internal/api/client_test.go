@@ -14,7 +14,7 @@ func TestRequestUploadURL(t *testing.T) {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
 
-		if r.URL.Path != "/api/v1/backups/upload-url" {
+		if r.URL.Path != "/api/v1/upload-url" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 
@@ -64,7 +64,7 @@ func TestRequestUploadURL(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient("test-key", server.URL, "1.0.0")
+	client := NewClient("test-key", server.URL+"/api/v1", "1.0.0")
 	resp, err := client.RequestUploadURL("backup.tar.gz.enc", 1024, "abc123", "mysql")
 
 	if err != nil {
@@ -111,7 +111,7 @@ func TestConfirmBackup(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient("test-key", server.URL, "1.0.0")
+	client := NewClient("test-key", server.URL+"/api/v1", "1.0.0")
 	err := client.ConfirmBackup("backup-1", 2048, "def456")
 
 	if err != nil {
@@ -152,7 +152,7 @@ func TestListBackups(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient("test-key", server.URL, "1.0.0")
+	client := NewClient("test-key", server.URL+"/api/v1", "1.0.0")
 	resp, err := client.ListBackups(2, 10)
 
 	if err != nil {
@@ -194,7 +194,7 @@ func TestGetBackup(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient("test-key", server.URL, "1.0.0")
+	client := NewClient("test-key", server.URL+"/api/v1", "1.0.0")
 	backup, err := client.GetBackup("backup-1")
 
 	if err != nil {
@@ -224,7 +224,7 @@ func TestDeleteBackup(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient("test-key", server.URL, "1.0.0")
+	client := NewClient("test-key", server.URL+"/api/v1", "1.0.0")
 	err := client.DeleteBackup("backup-1")
 
 	if err != nil {
@@ -250,7 +250,7 @@ func TestGetAccount(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient("test-key", server.URL, "1.0.0")
+	client := NewClient("test-key", server.URL+"/api/v1", "1.0.0")
 	info, err := client.GetAccount()
 
 	if err != nil {
@@ -291,7 +291,7 @@ func TestErrorMapping(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client := NewClient("test-key", server.URL, "1.0.0")
+			client := NewClient("test-key", server.URL+"/api/v1", "1.0.0")
 			_, err := client.GetAccount()
 
 			if err == nil {
@@ -315,7 +315,7 @@ func TestErrorMapping(t *testing.T) {
 }
 
 func TestConnectionError(t *testing.T) {
-	client := NewClient("test-key", "http://localhost:1", "1.0.0")
+	client := NewClient("test-key", "http://localhost:1/api/v1", "1.0.0")
 	_, err := client.GetAccount()
 
 	if err == nil {

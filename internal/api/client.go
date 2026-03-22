@@ -107,7 +107,7 @@ func (c *Client) RequestUploadURL(filename string, size int64, checksum, dbDrive
 		"db_driver": dbDriver,
 	}
 
-	body, err := c.do(http.MethodPost, "/api/v1/backups/upload-url", payload)
+	body, err := c.do(http.MethodPost, "/upload-url", payload)
 	if err != nil {
 		return nil, err
 	}
@@ -126,13 +126,13 @@ func (c *Client) ConfirmBackup(backupID string, size int64, checksum string) err
 		"checksum": checksum,
 	}
 
-	_, err := c.do(http.MethodPost, "/api/v1/backups/"+backupID+"/confirm", payload)
+	_, err := c.do(http.MethodPost, "/backups/"+backupID+"/confirm", payload)
 
 	return err
 }
 
 func (c *Client) ListBackups(page, perPage int) (*ListBackupsResponse, error) {
-	path := fmt.Sprintf("/api/v1/backups?page=%d&per_page=%d", page, perPage)
+	path := fmt.Sprintf("/backups?page=%d&per_page=%d", page, perPage)
 
 	body, err := c.do(http.MethodGet, path, nil)
 	if err != nil {
@@ -148,7 +148,7 @@ func (c *Client) ListBackups(page, perPage int) (*ListBackupsResponse, error) {
 }
 
 func (c *Client) GetBackup(backupID string) (*Backup, error) {
-	body, err := c.do(http.MethodGet, "/api/v1/backups/"+backupID, nil)
+	body, err := c.do(http.MethodGet, "/backups/"+backupID, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -162,13 +162,13 @@ func (c *Client) GetBackup(backupID string) (*Backup, error) {
 }
 
 func (c *Client) DeleteBackup(backupID string) error {
-	_, err := c.do(http.MethodDelete, "/api/v1/backups/"+backupID, nil)
+	_, err := c.do(http.MethodDelete, "/backups/"+backupID, nil)
 
 	return err
 }
 
 func (c *Client) GetAccount() (*AccountInfo, error) {
-	body, err := c.do(http.MethodGet, "/api/v1/account", nil)
+	body, err := c.do(http.MethodGet, "/account", nil)
 	if err != nil {
 		return nil, err
 	}
