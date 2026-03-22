@@ -16,7 +16,12 @@ import (
 // wiredService wraps backup.Service with the loaded config for status display.
 type wiredService struct {
 	*backup.Service
-	Config *config.Config
+	cfg *config.Config
+}
+
+// FullConfig returns the full application config (API key, URLs, etc.).
+func (w *wiredService) FullConfig() *config.Config {
+	return w.cfg
 }
 
 func buildService() (*wiredService, error) {
@@ -66,7 +71,7 @@ func buildService() (*wiredService, error) {
 		},
 	}
 
-	return &wiredService{Service: svc, Config: cfg}, nil
+	return &wiredService{Service: svc, cfg: cfg}, nil
 }
 
 // Adapters to bridge package-level functions to the backup interfaces.

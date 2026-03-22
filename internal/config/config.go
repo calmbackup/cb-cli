@@ -88,6 +88,23 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// LoadPartial loads config without validation (for notification when config is incomplete).
+func LoadPartial(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var cfg Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+
+	cfg.applyDefaults()
+
+	return &cfg, nil
+}
+
 func FindConfigFile() (string, error) {
 	// 1. Check /etc/calmbackup/calmbackup.yaml (system-wide, most common for servers)
 	if _, err := os.Stat(SystemConfigFile); err == nil {

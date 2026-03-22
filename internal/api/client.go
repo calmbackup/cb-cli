@@ -167,6 +167,17 @@ func (c *Client) DeleteBackup(backupID string) error {
 	return err
 }
 
+func (c *Client) Notify(event string, reason string) error {
+	payload := map[string]interface{}{}
+	if reason != "" {
+		payload["reason"] = reason
+	}
+
+	_, err := c.do(http.MethodPost, "/notify/"+event, payload)
+
+	return err
+}
+
 func (c *Client) GetAccount() (*AccountInfo, error) {
 	body, err := c.do(http.MethodGet, "/account", nil)
 	if err != nil {
