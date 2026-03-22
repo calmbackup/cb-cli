@@ -1,4 +1,5 @@
 bin/
+cb-cli
 dist/
 *.enc
 *.tar.gz

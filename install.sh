@@ -3,27 +3,25 @@
 # CalmBackup CLI Installer
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/calmbackup/cb-cli/master/install.sh | sudo bash
+#   curl -sSL https://raw.githubusercontent.com/calmbackup/cb-cli/master/install.sh | bash
 #
-# What it does:
-#   1. Downloads the latest calmbackup binary to /usr/local/bin/
-#   2. Creates /etc/calmbackup/ with a config template (if not already present)
-#   3. Creates /var/backups/calmbackup/ for local backup storage
-#   4. Installs a daily cron job at /etc/cron.d/calmbackup
+# As root (recommended for production servers):
+#   - Binary:  /usr/local/bin/calmbackup
+#   - Config:  /etc/calmbackup/calmbackup.yaml
+#   - Backups: /var/backups/calmbackup/
+#   - Cron:    /etc/cron.d/calmbackup (daily at 2:00 AM)
 #
-# After install, edit /etc/calmbackup/calmbackup.yaml with your credentials,
-# or run: sudo calmbackup init
+# As regular user:
+#   - Binary:  ~/.local/bin/calmbackup
+#   - Config:  ~/.config/calmbackup/calmbackup.yaml
+#   - Backups: ~/.local/share/calmbackup/
+#   - Cron:    user crontab (daily at 2:00 AM)
 #
 
 set -euo pipefail
 
 REPO="calmbackup/cb-cli"
 BINARY="calmbackup"
-INSTALL_DIR="/usr/local/bin"
-CONFIG_DIR="/etc/calmbackup"
-CONFIG_FILE="${CONFIG_DIR}/calmbackup.yaml"
-BACKUP_DIR="/var/backups/calmbackup"
-CRON_FILE="/etc/cron.d/calmbackup"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -36,13 +34,25 @@ warn()  { echo -e "${YELLOW}[!]${NC} $*"; }
 error() { echo -e "${RED}[x]${NC} $*" >&2; }
 bold()  { echo -e "${BOLD}$*${NC}"; }
 
-# --- Pre-flight checks ---
+# --- Detect privilege level ---
 
-if [ "$(id -u)" -ne 0 ]; then
-    error "This installer must be run as root."
-    echo "  Usage: curl -sSL https://raw.githubusercontent.com/calmbackup/cb-cli/master/install.sh | sudo bash"
-    exit 1
+if [ "$(id -u)" -eq 0 ]; then
+    MODE="system"
+    INSTALL_DIR="/usr/local/bin"
+    CONFIG_DIR="/etc/calmbackup"
+    BACKUP_DIR="/var/backups/calmbackup"
+else
+    MODE="user"
+    INSTALL_DIR="${HOME}/.local/bin"
+    CONFIG_DIR="${HOME}/.config/calmbackup"
+    BACKUP_DIR="${HOME}/.local/share/calmbackup"
 fi
+
+CONFIG_FILE="${CONFIG_DIR}/calmbackup.yaml"
+
+info "Install mode: ${MODE}"
+
+# --- Pre-flight checks ---
 
 if ! command -v curl &>/dev/null; then
     error "curl is required but not installed."
@@ -107,12 +117,20 @@ fi
 
 # --- Install binary ---
 
+mkdir -p "${INSTALL_DIR}"
 info "Installing to ${INSTALL_DIR}/${BINARY}..."
 tar -xzf "${TMP_DIR}/${TARBALL}" -C "${TMP_DIR}"
 install -m 755 "${TMP_DIR}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
 
 VERSION="$("${INSTALL_DIR}/${BINARY}" version 2>/dev/null || echo "${LATEST}")"
 info "Installed: ${VERSION}"
+
+# Check if INSTALL_DIR is in PATH
+if ! echo "${PATH}" | tr ':' '\n' | grep -qx "${INSTALL_DIR}"; then
+    warn "${INSTALL_DIR} is not in your PATH."
+    echo "  Add it with: export PATH=\"${INSTALL_DIR}:\${PATH}\""
+    echo "  Or add that line to your ~/.bashrc / ~/.zshrc"
+fi
 
 # --- Config directory ---
 
@@ -121,7 +139,7 @@ chmod 700 "${CONFIG_DIR}"
 
 if [ ! -f "${CONFIG_FILE}" ]; then
     info "Creating config template at ${CONFIG_FILE}..."
-    cat > "${CONFIG_FILE}" << 'YAML'
+    cat > "${CONFIG_FILE}" << YAML
 # CalmBackup configuration
 # Docs: https://github.com/calmbackup/cb-cli
 #
@@ -145,7 +163,7 @@ database:
 directories: []
 
 # Where to store local encrypted backups
-local_path: "/var/backups/calmbackup"
+local_path: "${BACKUP_DIR}"
 
 # How many days to keep local backups
 local_retention_days: 7
@@ -164,9 +182,11 @@ info "Backup directory: ${BACKUP_DIR}"
 
 # --- Cron job ---
 
-if [ ! -f "${CRON_FILE}" ]; then
-    info "Installing daily cron job..."
-    cat > "${CRON_FILE}" << 'CRON'
+if [ "${MODE}" = "system" ]; then
+    CRON_FILE="/etc/cron.d/calmbackup"
+    if [ ! -f "${CRON_FILE}" ]; then
+        info "Installing daily cron job..."
+        cat > "${CRON_FILE}" << 'CRON'
 # CalmBackup - daily encrypted database backup
 # Edit time as needed. Default: 2:00 AM
 # Logs go to syslog (view with: journalctl -t calmbackup)
@@ -176,10 +196,21 @@ PATH=/usr/local/bin:/usr/bin:/bin
 
 0 2 * * * root calmbackup run --quiet 2>&1 | logger -t calmbackup
 CRON
-    chmod 644 "${CRON_FILE}"
-    info "Cron installed: daily at 2:00 AM (edit ${CRON_FILE} to change)"
+        chmod 644 "${CRON_FILE}"
+        info "Cron installed: daily at 2:00 AM (edit ${CRON_FILE} to change)"
+    else
+        warn "Cron job already exists at ${CRON_FILE}, skipping."
+    fi
 else
-    warn "Cron job already exists at ${CRON_FILE}, skipping."
+    # User-level cron via crontab
+    CRON_LINE="0 2 * * * ${INSTALL_DIR}/calmbackup run --quiet 2>&1 | logger -t calmbackup"
+    if crontab -l 2>/dev/null | grep -qF "calmbackup run"; then
+        warn "Cron job already exists in user crontab, skipping."
+    else
+        info "Installing daily cron job in user crontab..."
+        (crontab -l 2>/dev/null || true; echo "# CalmBackup - daily encrypted database backup"; echo "${CRON_LINE}") | crontab -
+        info "Cron installed: daily at 2:00 AM (edit with: crontab -e)"
+    fi
 fi
 
 # --- Done ---
@@ -189,11 +220,21 @@ bold "CalmBackup CLI installed successfully!"
 echo
 echo "Next steps:"
 echo
-echo "  1. Edit the config with your credentials:"
-echo "     sudo nano ${CONFIG_FILE}"
-echo
-echo "  2. Or run the interactive setup:"
-echo "     sudo calmbackup init"
+
+if [ "${MODE}" = "system" ]; then
+    echo "  1. Edit the config with your credentials:"
+    echo "     sudo nano ${CONFIG_FILE}"
+    echo
+    echo "  2. Or run the interactive setup:"
+    echo "     sudo calmbackup init"
+else
+    echo "  1. Edit the config with your credentials:"
+    echo "     nano ${CONFIG_FILE}"
+    echo
+    echo "  2. Or run the interactive setup:"
+    echo "     calmbackup init"
+fi
+
 echo
 echo "  3. Test connectivity:"
 echo "     calmbackup status"
@@ -202,5 +243,10 @@ echo "  4. Run your first backup:"
 echo "     calmbackup run"
 echo
 echo "  Backups will run automatically every day at 2:00 AM."
-echo "  Logs: journalctl -t calmbackup"
+if [ "${MODE}" = "system" ]; then
+    echo "  Logs: journalctl -t calmbackup"
+else
+    echo "  Logs: journalctl -t calmbackup (or check syslog)"
+    echo "  Cron: crontab -e"
+fi
 echo

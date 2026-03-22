@@ -7,41 +7,57 @@ Supports **MySQL**, **PostgreSQL**, and **SQLite**.
 ## Install
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/calmbackup/cb-cli/master/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/calmbackup/cb-cli/master/install.sh | bash
 ```
 
-This will:
-- Install the `calmbackup` binary to `/usr/local/bin/`
-- Create a config template at `/etc/calmbackup/calmbackup.yaml`
-- Create the backup directory at `/var/backups/calmbackup/`
-- Set up a daily cron job (2:00 AM) at `/etc/cron.d/calmbackup`
+The installer auto-detects whether you're running as root or a regular user:
+
+**As root** (`sudo bash`):
+| | Path |
+|---|---|
+| Binary | `/usr/local/bin/calmbackup` |
+| Config | `/etc/calmbackup/calmbackup.yaml` |
+| Backups | `/var/backups/calmbackup/` |
+| Cron | `/etc/cron.d/calmbackup` |
+
+**As regular user** (`bash`):
+| | Path |
+|---|---|
+| Binary | `~/.local/bin/calmbackup` |
+| Config | `~/.config/calmbackup/calmbackup.yaml` |
+| Backups | `~/.local/share/calmbackup/` |
+| Cron | user crontab (`crontab -e`) |
+
+Both modes set up a daily cron job at 2:00 AM automatically.
 
 ## Setup
 
-After install, either edit the config directly:
+After install, run the interactive setup:
 
 ```bash
-sudo nano /etc/calmbackup/calmbackup.yaml
+calmbackup init        # as regular user
+sudo calmbackup init   # as root
 ```
 
-Or run the interactive setup:
+Or edit the config directly:
 
 ```bash
-sudo calmbackup init
+nano ~/.config/calmbackup/calmbackup.yaml   # user install
+sudo nano /etc/calmbackup/calmbackup.yaml   # root install
 ```
 
 You'll need:
 - Your **API key** from [app.calmbackup.com/dashboard](https://app.calmbackup.com/dashboard)
 - Your **database credentials**
 
-The setup generates an encryption key automatically and saves it to `/etc/calmbackup/calmbackup-recovery-key.txt`. **Store this key somewhere safe** — without it, your backups cannot be decrypted.
+The setup generates an encryption key automatically and saves a recovery key file. **Store this key somewhere safe** — without it, your backups cannot be decrypted.
 
 ## Configuration
 
 Config location (searched in order):
 1. `--config <path>` flag (explicit)
 2. `/etc/calmbackup/calmbackup.yaml` (system-wide)
-3. `~/.config/calmbackup/calmbackup.yaml` (user-level)
+3. `~/.config/calmbackup/calmbackup.yaml` (user-level, XDG-compliant)
 4. `./calmbackup.yaml` (current directory)
 
 ```yaml
@@ -60,7 +76,7 @@ database:
 directories:              # additional files to include (optional)
   - /var/www/app/uploads
 
-local_path: "/var/backups/calmbackup"
+local_path: "/var/backups/calmbackup"  # or ~/.local/share/calmbackup for user installs
 local_retention_days: 7
 ```
 
@@ -87,7 +103,11 @@ calmbackup version          # Print version
 The installer sets up a daily cron job automatically. To customize the schedule:
 
 ```bash
+# Root install
 sudo nano /etc/cron.d/calmbackup
+
+# User install
+crontab -e
 ```
 
 Default schedule: daily at 2:00 AM. Logs go to syslog:
