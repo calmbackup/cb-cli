@@ -8,6 +8,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	SystemConfigDir  = "/etc/calmbackup"
+	SystemConfigFile = "/etc/calmbackup/calmbackup.yaml"
+	DefaultLocalPath = "/var/backups/calmbackup"
+)
+
 type Config struct {
 	APIKey             string   `yaml:"api_key"`
 	EncryptionKey      string   `yaml:"encryption_key"`
@@ -62,7 +68,7 @@ func (c *Config) applyDefaults() {
 		c.LocalRetentionDays = 7
 	}
 	if c.LocalPath == "" {
-		c.LocalPath = "backups"
+		c.LocalPath = DefaultLocalPath
 	}
 }
 
@@ -83,13 +89,12 @@ func (c *Config) Validate() error {
 }
 
 func FindConfigFile() (string, error) {
-	// Check current directory first
-	localPath := "calmbackup.yaml"
-	if _, err := os.Stat(localPath); err == nil {
-		return filepath.Abs(localPath)
+	// 1. Check /etc/calmbackup/calmbackup.yaml (system-wide, most common for servers)
+	if _, err := os.Stat(SystemConfigFile); err == nil {
+		return SystemConfigFile, nil
 	}
 
-	// Check $HOME/.config/calmbackup/calmbackup.yaml
+	// 2. Check $HOME/.config/calmbackup/calmbackup.yaml
 	home, err := os.UserHomeDir()
 	if err == nil {
 		homePath := filepath.Join(home, ".config", "calmbackup", "calmbackup.yaml")
@@ -98,5 +103,26 @@ func FindConfigFile() (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("config file not found: searched ./calmbackup.yaml and ~/.config/calmbackup/calmbackup.yaml")
+	// 3. Check current directory
+	localPath := "calmbackup.yaml"
+	if _, err := os.Stat(localPath); err == nil {
+		return filepath.Abs(localPath)
+	}
+
+	return "", fmt.Errorf("config file not found: searched /etc/calmbackup/, ~/.config/calmbackup/, and ./calmbackup.yaml")
+}
+
+// ConfigDir returns the appropriate config directory based on effective user.
+// Root gets /etc/calmbackup, regular users get ~/.config/calmbackup.
+func ConfigDir() string {
+	if os.Geteuid() == 0 {
+		return SystemConfigDir
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "."
+	}
+
+	return filepath.Join(home, ".config", "calmbackup")
 }

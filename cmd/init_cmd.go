@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/calmbackup/cb-cli/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -15,12 +17,17 @@ func newInitCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "init",
 		Short: "Initialize a new calmbackup configuration",
+		Long:  "Interactive setup wizard. Run with sudo for system-wide config in /etc/calmbackup/.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			reader := bufio.NewReader(os.Stdin)
+			configDir := config.ConfigDir()
+			configPath := filepath.Join(configDir, "calmbackup.yaml")
+			recoveryPath := filepath.Join(configDir, "calmbackup-recovery-key.txt")
 
 			fmt.Println("CalmBackup Setup")
 			fmt.Println("================")
 			fmt.Println()
+			fmt.Printf("Config will be written to: %s\n\n", configPath)
 
 			// API Key
 			fmt.Print("API Key: ")
@@ -74,7 +81,7 @@ func newInitCmd() *cobra.Command {
 				dbConfig = fmt.Sprintf(`database:
   driver: %s
   host: "%s"
-  port: "%s"
+  port: %s
   database: "%s"
   username: "%s"
   password: "%s"`, driver, host, port, dbName, dbUser, dbPass)
@@ -97,37 +104,46 @@ func newInitCmd() *cobra.Command {
 			encryptionKey := hex.EncodeToString(keyBytes)
 
 			// Write config
-			config := fmt.Sprintf(`api_key: "%s"
+			cfgContent := fmt.Sprintf(`api_key: "%s"
 encryption_key: "%s"
-%s
-directories: []
-local_path: "backups"
-local_retention_days: 7
-`, apiKey, encryptionKey, dbConfig)
 
-			if err := os.WriteFile("calmbackup.yaml", []byte(config), 0600); err != nil {
+%s
+
+directories: []
+
+local_path: "%s"
+local_retention_days: 7
+`, apiKey, encryptionKey, dbConfig, config.DefaultLocalPath)
+
+			if err := os.MkdirAll(configDir, 0755); err != nil {
+				return fmt.Errorf("failed to create config directory %s: %w", configDir, err)
+			}
+
+			if err := os.MkdirAll(config.DefaultLocalPath, 0750); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not create backup directory %s: %v\n", config.DefaultLocalPath, err)
+			}
+
+			if err := os.WriteFile(configPath, []byte(cfgContent), 0600); err != nil {
 				return fmt.Errorf("failed to write config: %w", err)
 			}
 
 			// Write recovery key file
-			if err := os.WriteFile("calmbackup-recovery-key.txt", []byte(encryptionKey+"\n"), 0600); err != nil {
+			if err := os.WriteFile(recoveryPath, []byte(encryptionKey+"\n"), 0600); err != nil {
 				return fmt.Errorf("failed to write recovery key: %w", err)
 			}
 
 			fmt.Println()
-			fmt.Println("Configuration written to calmbackup.yaml")
-			fmt.Println("Recovery key written to calmbackup-recovery-key.txt")
+			fmt.Printf("Config written to:       %s\n", configPath)
+			fmt.Printf("Recovery key written to: %s\n", recoveryPath)
 			fmt.Println()
-			fmt.Println("IMPORTANT:")
-			fmt.Println("  1. Add both files to .gitignore:")
-			fmt.Println("     echo 'calmbackup.yaml' >> .gitignore")
-			fmt.Println("     echo 'calmbackup-recovery-key.txt' >> .gitignore")
+			fmt.Println("IMPORTANT: Store the recovery key in a safe place.")
+			fmt.Println("Without it, your backups cannot be decrypted.")
 			fmt.Println()
-			fmt.Println("  2. Store the recovery key in a safe place.")
-			fmt.Println("     Without it, your backups cannot be decrypted.")
+			fmt.Println("Run your first backup:")
+			fmt.Println("  calmbackup run")
 			fmt.Println()
-			fmt.Println("  3. To schedule automatic backups, add a crontab entry:")
-			fmt.Println("     0 2 * * * cd /path/to/project && calmbackup run")
+			fmt.Println("Check status:")
+			fmt.Println("  calmbackup status")
 
 			return nil
 		},
