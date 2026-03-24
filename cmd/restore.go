@@ -88,6 +88,7 @@ func newRestoreCmd() *cobra.Command {
 					return err
 				}
 				if selected == nil {
+					fmt.Println("Nothing was changed. Your database is untouched.")
 					return nil
 				}
 

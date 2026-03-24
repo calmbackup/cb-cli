@@ -24,8 +24,8 @@ func newInitCmd() *cobra.Command {
 			configPath := filepath.Join(configDir, "calmbackup.yaml")
 			recoveryPath := filepath.Join(configDir, "calmbackup-recovery-key.txt")
 
-			fmt.Println("CalmBackup Setup")
-			fmt.Println("================")
+			fmt.Println("Calm Backup Setup")
+			fmt.Println("=================")
 			fmt.Println()
 			fmt.Printf("Config will be written to: %s\n\n", configPath)
 
