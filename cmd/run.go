@@ -42,9 +42,6 @@ func newRunCmd(version string) *cobra.Command {
 				fmt.Printf("Backup successful: %s (%d bytes, %s)\n", result.Filename, result.Size, result.Duration)
 			}
 
-			// Auto-update after successful backup
-			autoUpdate(version, progress)
-
 			return nil
 		},
 	}

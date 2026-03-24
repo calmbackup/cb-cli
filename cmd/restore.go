@@ -50,7 +50,7 @@ func newRestoreCmd() *cobra.Command {
 				}
 
 				entry := resp.Data[0]
-				fmt.Printf("Restoring latest backup: %s (%s, %s)\n", entry.Filename, formatSize(entry.Size), entry.CreatedAt)
+				fmt.Printf("Restoring latest backup: %s (%s, %s)\n", entry.Filename, formatSize(entry.Size), formatTime(entry.CreatedAt))
 
 				if !yes && !confirmRestore(entry.Filename) {
 					fmt.Println("Restore cancelled.")
@@ -86,7 +86,7 @@ func newRestoreCmd() *cobra.Command {
 					return nil
 				}
 
-				fmt.Printf("Selected backup: %s (%s, %s)\n", selected.Filename, formatSize(selected.Size), selected.CreatedAt)
+				fmt.Printf("Selected backup: %s (%s, %s)\n", selected.Filename, formatSize(selected.Size), formatTime(selected.CreatedAt))
 
 				if !yes && !confirmRestore(selected.Filename) {
 					fmt.Println("Restore cancelled.")

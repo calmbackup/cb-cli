@@ -57,7 +57,7 @@ func (m pickerModel) View() string {
 	s := "Select a backup to restore:\n\n"
 
 	for i, b := range m.backups {
-		line := fmt.Sprintf("  ● %s   %s   %s", b.Filename, formatSize(b.Size), b.CreatedAt)
+		line := fmt.Sprintf("  ● %s   %s   %s", b.Filename, formatSize(b.Size), formatTime(b.CreatedAt))
 		if i == m.cursor {
 			line = selectedStyle.Render(line)
 		}

@@ -1,8 +1,11 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 
+	"github.com/calmbackup/cb-cli/internal/backup"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -17,6 +20,27 @@ func NewRootCmd(version string) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "calmbackup",
 		Short: "Zero-knowledge encrypted backup CLI",
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			if !quiet {
+				brand := lipgloss.NewStyle().Bold(true).Render("CalmBackup")
+				fmt.Fprintf(cmd.OutOrStdout(), "🪷 %s\n\n", brand)
+			}
+		},
+		PersistentPostRun: func(cmd *cobra.Command, args []string) {
+			// Skip auto-update for commands that don't do real work
+			name := cmd.Name()
+			if name == "version" || name == "help" || name == "calmbackup" {
+				return
+			}
+
+			var progress backup.ProgressFunc
+			if !quiet {
+				progress = func(msg string) {
+					fmt.Println(msg)
+				}
+			}
+			autoUpdate(version, progress)
+		},
 	}
 	root.PersistentFlags().StringVar(&cfgFile, "config", "", "config file path")
 	root.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
