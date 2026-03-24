@@ -1,10 +1,9 @@
 package cmd
 
 import (
-	"bufio"
 	"fmt"
 	"os"
-	"strings"
+	"path/filepath"
 
 	"github.com/calmbackup/cb-cli/internal/backup"
 	"github.com/spf13/cobra"
@@ -12,7 +11,7 @@ import (
 )
 
 func newRestoreCmd() *cobra.Command {
-	var latest, yes bool
+	var latest, yes, pruneLocal bool
 
 	cmd := &cobra.Command{
 		Use:   "restore [backup-id]",
@@ -52,9 +51,15 @@ func newRestoreCmd() *cobra.Command {
 				entry := resp.Data[0]
 				fmt.Printf("Restoring latest backup: %s (%s, %s)\n", entry.Filename, formatSize(entry.Size), formatTime(entry.CreatedAt))
 
-				if !yes && !confirmRestore(entry.Filename) {
-					fmt.Println("Restore cancelled.")
-					return nil
+				if !yes {
+					confirmed, err := runConfirm(entry.Filename)
+					if err != nil {
+						return err
+					}
+					if !confirmed {
+						fmt.Println("Nothing was changed. Your database is untouched.")
+						return nil
+					}
 				}
 
 				backupID = entry.ID
@@ -88,9 +93,15 @@ func newRestoreCmd() *cobra.Command {
 
 				fmt.Printf("Selected backup: %s (%s, %s)\n", selected.Filename, formatSize(selected.Size), formatTime(selected.CreatedAt))
 
-				if !yes && !confirmRestore(selected.Filename) {
-					fmt.Println("Restore cancelled.")
-					return nil
+				if !yes {
+					confirmed, err := runConfirm(selected.Filename)
+					if err != nil {
+						return err
+					}
+					if !confirmed {
+						fmt.Println("Nothing was changed. Your database is untouched.")
+						return nil
+					}
 				}
 
 				backupID = selected.ID
@@ -105,22 +116,47 @@ func newRestoreCmd() *cobra.Command {
 				fmt.Println("Restore completed successfully.")
 			}
 
+			if pruneLocal {
+				resp, err := svc.API.ListBackups(1, 100)
+				if err != nil {
+					return fmt.Errorf("failed to list cloud backups for pruning: %w", err)
+				}
+
+				cloudFiles := make(map[string]bool, len(resp.Data))
+				for _, entry := range resp.Data {
+					cloudFiles[entry.Filename] = true
+				}
+
+				localFiles, err := filepath.Glob(filepath.Join(svc.Config.LocalPath, "*.tar.gz.enc"))
+				if err != nil {
+					return fmt.Errorf("failed to list local backups: %w", err)
+				}
+
+				pruned := 0
+				for _, path := range localFiles {
+					if cloudFiles[filepath.Base(path)] {
+						if err := os.Remove(path); err != nil {
+							return fmt.Errorf("failed to remove %s: %w", filepath.Base(path), err)
+						}
+						pruned++
+					}
+				}
+
+				if pruned > 0 {
+					fmt.Printf("Pruned %d local backups (cloud copies confirmed).\n", pruned)
+				} else {
+					fmt.Println("No local backups to prune.")
+				}
+			}
+
 			return nil
 		},
 	}
 
 	cmd.Flags().BoolVar(&latest, "latest", false, "restore the most recent backup")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation prompt")
+	cmd.Flags().BoolVar(&pruneLocal, "prune-local", false, "delete local backups that exist in the cloud after restore")
 
 	return cmd
 }
 
-func confirmRestore(filename string) bool {
-	fmt.Printf("Restore %s? This will overwrite your current database. [y/N] ", filename)
-	scanner := bufio.NewScanner(os.Stdin)
-	if !scanner.Scan() {
-		return false
-	}
-	answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
-	return answer == "y" || answer == "yes"
-}
