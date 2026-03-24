@@ -26,11 +26,16 @@ func newRestoreCmd() *cobra.Command {
 			var progress backup.ProgressFunc
 			if !quiet {
 				progress = func(msg string) {
-					printStep(msg)
+					if len(msg) > 2 && msg[:2] == "✓ " {
+						printDone(msg[len("✓ "):])
+					} else {
+						printStep(msg)
+					}
 				}
 			}
 
 			var backupID string
+			var backupTime string
 
 			switch {
 			// Mode A: --latest flag
@@ -63,6 +68,7 @@ func newRestoreCmd() *cobra.Command {
 				}
 
 				backupID = entry.ID
+				backupTime = entry.CreatedAt
 
 			// Mode C: positional arg provided
 			case len(args) == 1:
@@ -106,6 +112,7 @@ func newRestoreCmd() *cobra.Command {
 				}
 
 				backupID = selected.ID
+				backupTime = selected.CreatedAt
 			}
 
 			if err := svc.Restore(backupID, progress); err != nil {
@@ -114,7 +121,11 @@ func newRestoreCmd() *cobra.Command {
 			}
 
 			if !quiet {
-				printDone("Restore completed successfully")
+				if backupTime != "" {
+					printSuccess(fmt.Sprintf("Backup from %s successfully restored", formatTime(backupTime)))
+				} else {
+					printSuccess("Backup successfully restored")
+				}
 			}
 
 			if pruneLocal {

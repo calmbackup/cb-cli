@@ -31,7 +31,7 @@ func (s *Service) Restore(backupID string, onProgress ProgressFunc) error {
 		if detail.Checksum != "" {
 			localChecksum, csErr := sha256sum(localPath)
 			if csErr == nil && localChecksum == detail.Checksum {
-				s.progress(onProgress, "Found locally — checksum verified, skipping download")
+				s.progress(onProgress, "✓ Found locally — checksum verified, skipping download")
 				useLocal = true
 			} else {
 				s.progress(onProgress, "Found locally — checksum mismatch, downloading from cloud")
@@ -93,7 +93,6 @@ func (s *Service) Restore(backupID string, onProgress ProgressFunc) error {
 		}
 	}
 
-	s.progress(onProgress, "Restore complete!")
 	return nil
 }
 

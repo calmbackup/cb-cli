@@ -55,6 +55,12 @@ func printSection(title string) {
 	fmt.Printf("\n%s%s\n", pad, headerStyle.Render(title))
 }
 
+// printSuccess prints a prominent success banner with spacing.
+func printSuccess(msg string) {
+	style := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("2"))
+	fmt.Printf("\n\n%s🪷 %s\n\n", pad, style.Render(msg))
+}
+
 func randomTagline() string {
 	messages := []string{
 		"Your data is safe with us.",

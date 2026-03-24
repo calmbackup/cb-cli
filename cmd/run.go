@@ -39,7 +39,7 @@ func newRunCmd(version string) *cobra.Command {
 			}
 
 			if !quiet {
-				printDone(fmt.Sprintf("Backup successful: %s (%s, %s)", result.Filename, formatSize(result.Size), result.Duration))
+				printSuccess(fmt.Sprintf("Backup complete — %s (%s) in %s", result.Filename, formatSize(result.Size), result.Duration))
 			}
 
 			return nil

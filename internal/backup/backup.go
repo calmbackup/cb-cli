@@ -88,6 +88,7 @@ type BackupEntry struct {
 type BackupDetail struct {
 	Filename    string
 	Checksum    string
+	CreatedAt   string
 	DownloadURL string
 }
 
