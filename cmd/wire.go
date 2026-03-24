@@ -142,6 +142,7 @@ func (a *apiAdapter) GetBackup(backupID string) (*backup.BackupDetail, error) {
 	}
 	return &backup.BackupDetail{
 		Filename:    b.Filename,
+		Checksum:    b.Checksum,
 		DownloadURL: b.DownloadURL,
 	}, nil
 }

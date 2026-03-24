@@ -26,14 +26,29 @@ func (s *Service) Restore(backupID string, onProgress ProgressFunc) error {
 
 	// 2. Check if file exists locally first
 	localPath := filepath.Join(s.Config.LocalPath, detail.Filename)
+	useLocal := false
 	if _, err := os.Stat(localPath); err == nil {
-		s.progress(onProgress, "Using local backup file...")
+		if detail.Checksum != "" {
+			localChecksum, csErr := sha256sum(localPath)
+			if csErr == nil && localChecksum == detail.Checksum {
+				s.progress(onProgress, "Found locally — checksum verified, skipping download")
+				useLocal = true
+			} else {
+				s.progress(onProgress, "Found locally — checksum mismatch, downloading from cloud")
+			}
+		} else {
+			s.progress(onProgress, "Found locally — skipping download")
+			useLocal = true
+		}
+	}
+
+	if useLocal {
 		if err := copyFile(localPath, encryptedPath); err != nil {
 			return fmt.Errorf("failed to copy local file: %w", err)
 		}
 	} else {
 		// 3. Download from cloud
-		s.progress(onProgress, "Downloading backup...")
+		s.progress(onProgress, "Downloading from cloud...")
 		if err := s.Uploader.Download(detail.DownloadURL, encryptedPath); err != nil {
 			return fmt.Errorf("download failed: %w", err)
 		}

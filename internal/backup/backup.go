@@ -87,6 +87,7 @@ type BackupEntry struct {
 // BackupDetail represents detailed backup info.
 type BackupDetail struct {
 	Filename    string
+	Checksum    string
 	DownloadURL string
 }
 
