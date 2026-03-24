@@ -125,11 +125,34 @@ install -m 755 "${TMP_DIR}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
 VERSION="$("${INSTALL_DIR}/${BINARY}" version 2>/dev/null || echo "${LATEST}")"
 info "Installed: ${VERSION}"
 
-# Check if INSTALL_DIR is in PATH
+# Ensure INSTALL_DIR is in PATH (for user-mode installs)
 if ! echo "${PATH}" | tr ':' '\n' | grep -qx "${INSTALL_DIR}"; then
-    warn "${INSTALL_DIR} is not in your PATH."
-    echo "  Add it with: export PATH=\"${INSTALL_DIR}:\${PATH}\""
-    echo "  Or add that line to your ~/.bashrc / ~/.zshrc"
+    EXPORT_LINE="export PATH=\"${INSTALL_DIR}:\${PATH}\""
+
+    # Add to current session immediately
+    export PATH="${INSTALL_DIR}:${PATH}"
+
+    # Persist to shell profile
+    ADDED_TO=""
+    for RC_FILE in "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.profile"; do
+        if [ -f "${RC_FILE}" ]; then
+            if ! grep -qF "${INSTALL_DIR}" "${RC_FILE}"; then
+                echo "" >> "${RC_FILE}"
+                echo "# Added by CalmBackup installer" >> "${RC_FILE}"
+                echo "${EXPORT_LINE}" >> "${RC_FILE}"
+                ADDED_TO="${ADDED_TO} $(basename "${RC_FILE}")"
+            fi
+        fi
+    done
+
+    # If no shell config existed, create .profile
+    if [ -z "${ADDED_TO}" ]; then
+        echo "# Added by CalmBackup installer" > "${HOME}/.profile"
+        echo "${EXPORT_LINE}" >> "${HOME}/.profile"
+        ADDED_TO=" .profile"
+    fi
+
+    info "Added ${INSTALL_DIR} to PATH in:${ADDED_TO}"
 fi
 
 # --- Config directory ---
