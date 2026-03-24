@@ -64,15 +64,17 @@ func (s *Service) Restore(backupID string, onProgress ProgressFunc) error {
 		return fmt.Errorf("database restore failed: %w", err)
 	}
 
-	// 7. Restore directories (copy extracted dirs back to configured paths)
-	s.progress(onProgress, "Restoring directories...")
-	for _, dir := range s.Config.Directories {
-		srcDir := filepath.Join(extractDir, dir)
-		if _, err := os.Stat(srcDir); os.IsNotExist(err) {
-			continue
-		}
-		if err := copyDir(srcDir, dir); err != nil {
-			return fmt.Errorf("failed to restore directory %s: %w", dir, err)
+	// 7. Restore directories (only if configured)
+	if len(s.Config.Directories) > 0 {
+		s.progress(onProgress, "Restoring directories...")
+		for _, dir := range s.Config.Directories {
+			srcDir := filepath.Join(extractDir, dir)
+			if _, err := os.Stat(srcDir); os.IsNotExist(err) {
+				continue
+			}
+			if err := copyDir(srcDir, dir); err != nil {
+				return fmt.Errorf("failed to restore directory %s: %w", dir, err)
+			}
 		}
 	}
 

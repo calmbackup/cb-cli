@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -20,12 +20,10 @@ func newListCmd() *cobra.Command {
 				return err
 			}
 
-			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-
 			// Local backups
-			fmt.Fprintln(w, "LOCAL BACKUPS")
-			fmt.Fprintln(w, "FILENAME\tSIZE")
+			printSection("Local Backups")
 			entries, err := os.ReadDir(svc.Config.LocalPath)
+			localFound := false
 			if err == nil {
 				for _, entry := range entries {
 					if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".tar.gz.enc") {
@@ -37,25 +35,29 @@ func newListCmd() *cobra.Command {
 						continue
 					}
 
-					fmt.Fprintf(w, "%s\t%s\n", entry.Name(), formatSize(info.Size()))
+					localFound = true
+					printInfo(fmt.Sprintf("🔒 %-45s  %s", entry.Name(), formatSize(info.Size())))
 				}
 			}
-
-			fmt.Fprintln(w)
+			if !localFound {
+				printInfo(dimStyle.Render("No local backups"))
+			}
 
 			// Cloud backups
-			fmt.Fprintln(w, "CLOUD BACKUPS")
-			fmt.Fprintln(w, "FILENAME")
+			printSection("Cloud Backups")
 			resp, err := svc.API.ListBackups(1, 50)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not list cloud backups: %v\n", err)
+				printInfo(dimStyle.Render("Could not list cloud backups"))
+			} else if len(resp.Data) == 0 {
+				printInfo(dimStyle.Render("No cloud backups"))
 			} else {
 				for _, entry := range resp.Data {
-					fmt.Fprintln(w, entry.Filename)
+					ts := formatCloudTime(entry.CreatedAt)
+					printInfo(fmt.Sprintf("🔒 %-45s  %s  %s", entry.Filename, formatSize(entry.Size), ts))
 				}
 			}
 
-			w.Flush()
+			fmt.Println()
 			return nil
 		},
 	}
@@ -78,6 +80,16 @@ func formatSize(bytes int64) string {
 	default:
 		return fmt.Sprintf("%d B", bytes)
 	}
+}
+
+// formatCloudTime parses a timestamp string and returns a short format like "Mar 24, 18:44".
+func formatCloudTime(ts string) string {
+	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05.000000Z", "2006-01-02 15:04:05"} {
+		if t, err := time.Parse(layout, ts); err == nil {
+			return t.Format("Jan 02, 15:04")
+		}
+	}
+	return ts
 }
 
 // localBackupCount returns the number of .tar.gz.enc files in a directory.

@@ -21,7 +21,7 @@ func NewRootCmd(version string) *cobra.Command {
 		Short: "Zero-knowledge encrypted backup CLI",
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			if !quiet {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s\n\n", brandHeader())
+				fmt.Fprint(cmd.OutOrStdout(), brandHeader())
 			}
 		},
 		PersistentPostRun: func(cmd *cobra.Command, args []string) {
@@ -38,9 +38,6 @@ func NewRootCmd(version string) *cobra.Command {
 				}
 			}
 			autoUpdate(version, progress)
-			if !quiet {
-				fmt.Printf("\n%s\n", brandSignature())
-			}
 		},
 	}
 	root.PersistentFlags().StringVar(&cfgFile, "config", "", "config file path")

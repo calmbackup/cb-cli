@@ -8,17 +8,54 @@ import (
 )
 
 var (
-	brandStyle = lipgloss.NewStyle().Bold(true)
-	dimStyle   = lipgloss.NewStyle().Faint(true)
+	brandStyle   = lipgloss.NewStyle().Bold(true)
+	dimStyle     = lipgloss.NewStyle().Faint(true)
+	stepStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+	successStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true)
+	labelStyle   = lipgloss.NewStyle().Faint(true)
+	headerStyle  = lipgloss.NewStyle().Bold(true).Underline(true)
 )
 
-// brandHeader returns the branded header line: 🪷 Calm Backup
+const pad = "  "
+
+// brandHeader returns the branded header block with top padding and tagline.
 func brandHeader() string {
-	return fmt.Sprintf("🪷 %s", brandStyle.Render("Calm Backup"))
+	brand := fmt.Sprintf("%s🪷 %s", pad, brandStyle.Render("Calm Backup"))
+	tagline := dimStyle.Render(fmt.Sprintf("%s%s", pad, randomTagline()))
+	return fmt.Sprintf("\n\n%s\n%s\n", brand, tagline)
 }
 
-// brandSignature returns a random reassuring sign-off message.
-func brandSignature() string {
+// brandFooter returns the closing signature.
+func brandFooter() string {
+	return ""
+}
+
+// printStep prints a progress step with an arrow indicator.
+func printStep(msg string) {
+	fmt.Printf("%s%s %s\n", pad, stepStyle.Render("→"), msg)
+}
+
+// printDone prints a success step with a checkmark.
+func printDone(msg string) {
+	fmt.Printf("%s%s %s\n", pad, successStyle.Render("✓"), msg)
+}
+
+// printInfo prints an informational line with padding.
+func printInfo(msg string) {
+	fmt.Printf("%s%s\n", pad, msg)
+}
+
+// printLabel prints a key-value pair with styled label.
+func printLabel(label, value string) {
+	fmt.Printf("%s%-16s %s\n", pad, labelStyle.Render(label), value)
+}
+
+// printSection prints a section header.
+func printSection(title string) {
+	fmt.Printf("\n%s%s\n", pad, headerStyle.Render(title))
+}
+
+func randomTagline() string {
 	messages := []string{
 		"Your data is safe with us.",
 		"Encrypted. Automated. Calm.",
@@ -31,6 +68,5 @@ func brandSignature() string {
 		"Secure backups, peaceful mind.",
 		"Protection that runs itself.",
 	}
-	msg := messages[rand.Intn(len(messages))]
-	return dimStyle.Render(fmt.Sprintf("  %s", msg))
+	return messages[rand.Intn(len(messages))]
 }

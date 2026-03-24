@@ -27,7 +27,7 @@ func newRunCmd(version string) *cobra.Command {
 			var progress backup.ProgressFunc
 			if !quiet {
 				progress = func(msg string) {
-					fmt.Println(msg)
+					printStep(msg)
 				}
 			}
 
@@ -39,7 +39,7 @@ func newRunCmd(version string) *cobra.Command {
 			}
 
 			if !quiet {
-				fmt.Printf("Backup successful: %s (%d bytes, %s)\n", result.Filename, result.Size, result.Duration)
+				printDone(fmt.Sprintf("Backup successful: %s (%s, %s)", result.Filename, formatSize(result.Size), result.Duration))
 			}
 
 			return nil

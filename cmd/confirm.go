@@ -51,8 +51,8 @@ func (m confirmModel) View() string {
 		return ""
 	}
 
-	s := fmt.Sprintf("  %s\n", m.message)
-	s += "  This will overwrite your current database.\n\n"
+	s := fmt.Sprintf("%s%s\n", pad, m.message)
+	s += pad + "This will overwrite your current database.\n\n"
 
 	noLabel := "[ No ]"
 	yesLabel := "[ Yes ]"
@@ -65,7 +65,7 @@ func (m confirmModel) View() string {
 		yesLabel = activeButtonStyle.Render(yesLabel)
 	}
 
-	s += fmt.Sprintf("  %s  %s\n", noLabel, yesLabel)
+	s += fmt.Sprintf("%s%s  %s\n", pad, noLabel, yesLabel)
 
 	return s
 }

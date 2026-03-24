@@ -26,7 +26,7 @@ func newRestoreCmd() *cobra.Command {
 			var progress backup.ProgressFunc
 			if !quiet {
 				progress = func(msg string) {
-					fmt.Println(msg)
+					printStep(msg)
 				}
 			}
 
@@ -44,12 +44,12 @@ func newRestoreCmd() *cobra.Command {
 					return fmt.Errorf("failed to list backups: %w", err)
 				}
 				if len(resp.Data) == 0 {
-					fmt.Println("No backups found. Run 'calmbackup run' to create one.")
+					printInfo("No backups found. Run 'calmbackup run' to create one.")
 					return nil
 				}
 
 				entry := resp.Data[0]
-				fmt.Printf("Restoring latest backup: %s (%s, %s)\n", entry.Filename, formatSize(entry.Size), formatTime(entry.CreatedAt))
+				printInfo(fmt.Sprintf("Restoring latest backup: %s (%s, %s)", entry.Filename, formatSize(entry.Size), formatTime(entry.CreatedAt)))
 
 				if !yes {
 					confirmed, err := runConfirm(entry.Filename)
@@ -57,7 +57,7 @@ func newRestoreCmd() *cobra.Command {
 						return err
 					}
 					if !confirmed {
-						fmt.Println("Nothing was changed. Your database is untouched.")
+						printInfo("Nothing was changed. Your database is untouched.")
 						return nil
 					}
 				}
@@ -79,7 +79,7 @@ func newRestoreCmd() *cobra.Command {
 					return fmt.Errorf("failed to list backups: %w", err)
 				}
 				if len(resp.Data) == 0 {
-					fmt.Println("No backups found. Run 'calmbackup run' to create one.")
+					printInfo("No backups found. Run 'calmbackup run' to create one.")
 					return nil
 				}
 
@@ -88,11 +88,11 @@ func newRestoreCmd() *cobra.Command {
 					return err
 				}
 				if selected == nil {
-					fmt.Println("Nothing was changed. Your database is untouched.")
+					printInfo("Nothing was changed. Your database is untouched.")
 					return nil
 				}
 
-				fmt.Printf("Selected backup: %s (%s, %s)\n", selected.Filename, formatSize(selected.Size), formatTime(selected.CreatedAt))
+				printInfo(fmt.Sprintf("Selected backup: %s (%s, %s)", selected.Filename, formatSize(selected.Size), formatTime(selected.CreatedAt)))
 
 				if !yes {
 					confirmed, err := runConfirm(selected.Filename)
@@ -100,7 +100,7 @@ func newRestoreCmd() *cobra.Command {
 						return err
 					}
 					if !confirmed {
-						fmt.Println("Nothing was changed. Your database is untouched.")
+						printInfo("Nothing was changed. Your database is untouched.")
 						return nil
 					}
 				}
@@ -114,7 +114,7 @@ func newRestoreCmd() *cobra.Command {
 			}
 
 			if !quiet {
-				fmt.Println("Restore completed successfully.")
+				printDone("Restore completed successfully")
 			}
 
 			if pruneLocal {
@@ -144,9 +144,9 @@ func newRestoreCmd() *cobra.Command {
 				}
 
 				if pruned > 0 {
-					fmt.Printf("Pruned %d local backups (cloud copies confirmed).\n", pruned)
+					printDone(fmt.Sprintf("Pruned %d local backups (cloud copies confirmed)", pruned))
 				} else {
-					fmt.Println("No local backups to prune.")
+					printInfo("No local backups to prune.")
 				}
 			}
 

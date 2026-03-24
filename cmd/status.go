@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -22,20 +21,21 @@ func newStatusCmd() *cobra.Command {
 			size := localBackupSize(svc.Config.LocalPath)
 			latest := latestBackupFile(svc.Config.LocalPath)
 
-			fmt.Printf("Local backups:  %d (%s)\n", count, formatSize(size))
-			fmt.Printf("Latest backup:  %s\n", latest)
-			fmt.Printf("Local path:     %s\n", svc.Config.LocalPath)
-			fmt.Printf("Retention:      %d days\n", svc.Config.RetentionDays)
+			fmt.Println()
+			printLabel("Local Backups", fmt.Sprintf("%d (%s)", count, formatSize(size)))
+			printLabel("Latest", latest)
+			printLabel("Local Path", svc.Config.LocalPath)
+			printLabel("Retention", fmt.Sprintf("%d days", svc.Config.RetentionDays))
 
 			// API connectivity
-			fmt.Print("API connection: ")
 			_, err = svc.API.ListBackups(1, 1)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "FAILED (%v)\n", err)
+				printLabel("API Connection", "✗ Failed — "+err.Error())
 			} else {
-				fmt.Println("OK")
+				printLabel("API Connection", successStyle.Render("✓ Connected"))
 			}
 
+			fmt.Println()
 			return nil
 		},
 	}
