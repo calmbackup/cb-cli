@@ -113,14 +113,14 @@ directories: []
 
 local_path: "%s"
 local_retention_days: 7
-`, apiKey, encryptionKey, dbConfig, config.DefaultLocalPath)
+`, apiKey, encryptionKey, dbConfig, config.LocalPath())
 
 			if err := os.MkdirAll(configDir, 0755); err != nil {
 				return fmt.Errorf("failed to create config directory %s: %w", configDir, err)
 			}
 
-			if err := os.MkdirAll(config.DefaultLocalPath, 0750); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not create backup directory %s: %v\n", config.DefaultLocalPath, err)
+			if err := os.MkdirAll(config.LocalPath(), 0750); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not create backup directory %s: %v\n", config.LocalPath(), err)
 			}
 
 			if err := os.WriteFile(configPath, []byte(cfgContent), 0600); err != nil {

@@ -14,6 +14,21 @@ const (
 	DefaultLocalPath = "/var/backups/calmbackup"
 )
 
+// LocalPath returns the appropriate backup directory based on effective user.
+// Root gets /var/backups/calmbackup, regular users get ~/.local/share/calmbackup.
+func LocalPath() string {
+	if os.Geteuid() == 0 {
+		return DefaultLocalPath
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return DefaultLocalPath
+	}
+
+	return filepath.Join(home, ".local", "share", "calmbackup")
+}
+
 type Config struct {
 	APIKey             string   `yaml:"api_key"`
 	EncryptionKey      string   `yaml:"encryption_key"`
@@ -68,7 +83,7 @@ func (c *Config) applyDefaults() {
 		c.LocalRetentionDays = 7
 	}
 	if c.LocalPath == "" {
-		c.LocalPath = DefaultLocalPath
+		c.LocalPath = LocalPath()
 	}
 }
 

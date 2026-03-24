@@ -143,8 +143,8 @@ database:
 	if cfg.LocalRetentionDays != 7 {
 		t.Errorf("expected default local_retention_days 7, got %d", cfg.LocalRetentionDays)
 	}
-	if cfg.LocalPath != "/var/backups/calmbackup" {
-		t.Errorf("expected default local_path '/var/backups/calmbackup', got %q", cfg.LocalPath)
+	if cfg.LocalPath != LocalPath() {
+		t.Errorf("expected default local_path %q, got %q", LocalPath(), cfg.LocalPath)
 	}
 }
 
