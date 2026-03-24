@@ -77,7 +77,10 @@ type ListBackupsResponse struct {
 
 // BackupEntry represents a single backup in a list.
 type BackupEntry struct {
+	ID          string
 	Filename    string
+	Size        int64
+	CreatedAt   string
 	DownloadURL string
 }
 

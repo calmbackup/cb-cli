@@ -125,7 +125,10 @@ func (a *apiAdapter) ListBackups(page, perPage int) (*backup.ListBackupsResponse
 	entries := make([]backup.BackupEntry, len(resp.Data))
 	for i, b := range resp.Data {
 		entries[i] = backup.BackupEntry{
+			ID:          b.ID,
 			Filename:    b.Filename,
+			Size:        b.Size,
+			CreatedAt:   b.CreatedAt,
 			DownloadURL: b.DownloadURL,
 		}
 	}
