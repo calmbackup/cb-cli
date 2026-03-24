@@ -22,7 +22,7 @@ const pad = "  "
 func brandHeader() string {
 	brand := fmt.Sprintf("%s🪷 %s", pad, brandStyle.Render("Calm Backup"))
 	tagline := dimStyle.Render(fmt.Sprintf("%s%s", pad, randomTagline()))
-	return fmt.Sprintf("\n\n%s\n%s\n", brand, tagline)
+	return fmt.Sprintf("\n\n%s\n%s\n\n", brand, tagline)
 }
 
 // brandFooter returns the closing signature.

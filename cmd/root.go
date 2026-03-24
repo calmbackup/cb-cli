@@ -38,6 +38,9 @@ func NewRootCmd(version string) *cobra.Command {
 				}
 			}
 			autoUpdate(version, progress)
+			if !quiet {
+				fmt.Println()
+			}
 		},
 	}
 	root.PersistentFlags().StringVar(&cfgFile, "config", "", "config file path")
