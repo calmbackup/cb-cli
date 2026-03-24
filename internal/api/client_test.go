@@ -275,6 +275,7 @@ func TestErrorMapping(t *testing.T) {
 	}{
 		{"401 auth error", 401, `{"message":"Unauthorized"}`, ErrAuthentication},
 		{"402 billing error", 402, `{"message":"Payment required"}`, ErrBilling},
+		{"409 backup deleted", 409, `{"message":"Backup was previously deleted"}`, ErrBackupDeleted},
 		{"413 size limit", 413, `{"message":"Too large"}`, ErrSizeLimit},
 		{"422 validation", 422, `{"message":"Invalid","details":{"field":"required"}}`, ErrValidation},
 		{"429 rate limit", 429, `{"message":"Too many requests"}`, ErrRateLimit},

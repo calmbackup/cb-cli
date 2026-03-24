@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/calmbackup/cb-cli/internal/api"
 )
 
 // --- Mock implementations ---
@@ -117,21 +119,26 @@ func (m *mockEncryptor) Decrypt(inputPath, outputPath string) error {
 }
 
 type mockAPIClient struct {
-	mu               sync.Mutex
-	calls            []string
-	requestUploadErr error
-	confirmErr       error
-	listBackupsResp  *ListBackupsResponse
-	listBackupsErr   error
-	getBackupResp    *BackupDetail
-	getBackupErr     error
-	uploadCounter    int
+	mu                   sync.Mutex
+	calls                []string
+	requestUploadErr     error
+	requestUploadErrByFn map[string]error
+	confirmErr           error
+	listBackupsResp      *ListBackupsResponse
+	listBackupsErr       error
+	getBackupResp        *BackupDetail
+	getBackupErr         error
+	uploadCounter        int
 }
 
 func (m *mockAPIClient) RequestUploadURL(filename string, size int64, checksum, dbDriver string) (*UploadURLResponse, error) {
 	m.mu.Lock()
 	m.calls = append(m.calls, "request-upload:"+filename)
+	fnErr := m.requestUploadErrByFn[filename]
 	m.mu.Unlock()
+	if fnErr != nil {
+		return nil, fnErr
+	}
 	if m.requestUploadErr != nil {
 		return nil, m.requestUploadErr
 	}
@@ -578,5 +585,102 @@ func TestBackup_NilProgressFunc(t *testing.T) {
 
 	if !result.Success {
 		t.Fatalf("expected success, got error: %s", result.Error)
+	}
+}
+
+func TestBackup_CatchUpUpload_SkipsDeletedBackups(t *testing.T) {
+	svc, _, _, _, apiMock, uploader, _ := newTestService(t)
+
+	// Create local backup files
+	deletedFile := filepath.Join(svc.Config.LocalPath, "backup-20250101-120000.tar.gz.enc")
+	normalFile := filepath.Join(svc.Config.LocalPath, "backup-20250102-120000.tar.gz.enc")
+	os.WriteFile(deletedFile, []byte("encrypted-deleted"), 0644)
+	os.WriteFile(normalFile, []byte("encrypted-normal"), 0644)
+
+	// Neither file is in the cloud
+	apiMock.listBackupsResp = &ListBackupsResponse{}
+
+	// The deleted file returns a 409 error from the API
+	apiMock.requestUploadErrByFn = map[string]error{
+		"backup-20250101-120000.tar.gz.enc": &api.APIError{StatusCode: 409, Message: "Backup was previously deleted"},
+	}
+
+	result, progress := collectProgress(func(pf ProgressFunc) Result {
+		return svc.Backup(pf)
+	})
+
+	if !result.Success {
+		t.Fatalf("expected success, got error: %s", result.Error)
+	}
+
+	// Should have a "Skipped" progress message for the deleted file
+	foundSkip := false
+	for _, msg := range progress {
+		if strings.Contains(msg, "Skipped") && strings.Contains(msg, "backup-20250101-120000") {
+			foundSkip = true
+		}
+	}
+	if !foundSkip {
+		t.Error("expected 'Skipped' progress message for deleted backup")
+	}
+
+	// The deleted file should NOT have been uploaded
+	for _, call := range uploader.calls {
+		if strings.Contains(call, "backup-20250101-120000") {
+			t.Error("deleted backup should not have been uploaded")
+		}
+	}
+
+	// The normal file SHOULD have been uploaded (catch-up)
+	foundNormalUpload := false
+	for _, call := range uploader.calls {
+		if strings.Contains(call, "backup-20250102-120000") {
+			foundNormalUpload = true
+		}
+	}
+	if !foundNormalUpload {
+		t.Error("expected normal backup to be uploaded via catch-up")
+	}
+}
+
+func TestBackup_MainUpload_SkipsDeletedBackup(t *testing.T) {
+	svc, _, _, _, apiMock, uploader, _ := newTestService(t)
+
+	// Make the main upload return 409 (the new backup happens to have
+	// the same checksum as a previously deleted one)
+	apiMock.requestUploadErr = &api.APIError{StatusCode: 409, Message: "Backup was previously deleted"}
+
+	result, progress := collectProgress(func(pf ProgressFunc) Result {
+		return svc.Backup(pf)
+	})
+
+	// Backup should still succeed (local copy is saved)
+	if !result.Success {
+		t.Fatalf("expected success, got error: %s", result.Error)
+	}
+
+	// Should have a "Skipped" message, not a "Warning"
+	foundSkip := false
+	foundWarning := false
+	for _, msg := range progress {
+		if strings.Contains(msg, "Skipped") && strings.Contains(msg, "previously deleted") {
+			foundSkip = true
+		}
+		if strings.Contains(msg, "Warning") && strings.Contains(msg, "upload request failed") {
+			foundWarning = true
+		}
+	}
+	if !foundSkip {
+		t.Error("expected 'Skipped' progress message for deleted backup")
+	}
+	if foundWarning {
+		t.Error("409 should not produce a warning, it should be a clean skip")
+	}
+
+	// Upload should NOT have been attempted
+	for _, call := range uploader.calls {
+		if strings.HasPrefix(call, "upload:") {
+			t.Error("upload should not have been called when backup was previously deleted")
+		}
 	}
 }

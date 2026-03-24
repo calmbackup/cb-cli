@@ -9,6 +9,7 @@ import (
 var (
 	ErrAuthentication = errors.New("authentication failed")
 	ErrBilling        = errors.New("billing issue")
+	ErrBackupDeleted  = errors.New("backup was previously deleted")
 	ErrSizeLimit      = errors.New("size limit exceeded")
 	ErrValidation     = errors.New("validation error")
 	ErrRateLimit      = errors.New("rate limit exceeded")
@@ -35,6 +36,8 @@ func (e *APIError) Is(target error) bool {
 		return e.StatusCode == 401
 	case target == ErrBilling:
 		return e.StatusCode == 402
+	case target == ErrBackupDeleted:
+		return e.StatusCode == 409
 	case target == ErrSizeLimit:
 		return e.StatusCode == 413
 	case target == ErrValidation:

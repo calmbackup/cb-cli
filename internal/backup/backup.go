@@ -2,12 +2,15 @@ package backup
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/calmbackup/cb-cli/internal/api"
 )
 
 // ProgressFunc is called with status messages during backup/restore.
@@ -181,7 +184,9 @@ func (s *Service) Backup(onProgress ProgressFunc) Result {
 	// 9. Request upload URL, upload, confirm
 	s.progress(onProgress, "Uploading backup...")
 	resp, err := s.API.RequestUploadURL(encryptedFilename, fileInfo.Size(), checksum, s.Config.DBDriver)
-	if err != nil {
+	if errors.Is(err, api.ErrBackupDeleted) {
+		s.progress(onProgress, "Skipped: backup was previously deleted from cloud")
+	} else if err != nil {
 		// Upload failure is non-fatal; local backup still exists
 		s.progress(onProgress, fmt.Sprintf("Warning: upload request failed: %v", err))
 	} else {
@@ -254,6 +259,10 @@ func (s *Service) catchUpUpload(onProgress ProgressFunc) {
 
 		s.progress(onProgress, fmt.Sprintf("Catch-up uploading %s...", entry.Name()))
 		resp, err := s.API.RequestUploadURL(entry.Name(), info.Size(), checksum, s.Config.DBDriver)
+		if errors.Is(err, api.ErrBackupDeleted) {
+			s.progress(onProgress, fmt.Sprintf("Skipped %s: previously deleted from cloud", entry.Name()))
+			continue
+		}
 		if err != nil {
 			s.progress(onProgress, fmt.Sprintf("Warning: catch-up upload request failed for %s: %v", entry.Name(), err))
 			continue
