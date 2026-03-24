@@ -11,7 +11,7 @@ func formatTime(isoTime string) string {
 		return isoTime
 	}
 
-	readable := t.Local().Format("Jan 2, 3:04 PM")
+	readable := t.Local().Format("Jan 2, 2006 15:04")
 
 	d := time.Since(t)
 	var ago string

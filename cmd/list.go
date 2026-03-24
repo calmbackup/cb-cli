@@ -86,7 +86,7 @@ func formatSize(bytes int64) string {
 func formatCloudTime(ts string) string {
 	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05.000000Z", "2006-01-02 15:04:05"} {
 		if t, err := time.Parse(layout, ts); err == nil {
-			return t.Format("Jan 02, 15:04")
+			return t.Format("Jan 02, 2006 15:04")
 		}
 	}
 	return ts
