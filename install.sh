@@ -128,12 +128,27 @@ info "Installed: ${VERSION}"
 # Ensure INSTALL_DIR is in PATH (for user-mode installs)
 if ! echo "${PATH}" | tr ':' '\n' | grep -qx "${INSTALL_DIR}"; then
     EXPORT_LINE="export PATH=\"${INSTALL_DIR}:\${PATH}\""
+    FISH_LINE="fish_add_path ${INSTALL_DIR}"
+    FISH_CONFIG="${HOME}/.config/fish/config.fish"
 
     # Add to current session immediately
     export PATH="${INSTALL_DIR}:${PATH}"
 
-    # Persist to shell profile
+    # Persist to shell profiles
     ADDED_TO=""
+
+    # fish shell
+    if [ -d "${HOME}/.config/fish" ]; then
+        if [ ! -f "${FISH_CONFIG}" ] || ! grep -qF "${INSTALL_DIR}" "${FISH_CONFIG}"; then
+            mkdir -p "${HOME}/.config/fish"
+            echo "" >> "${FISH_CONFIG}"
+            echo "# Added by CalmBackup installer" >> "${FISH_CONFIG}"
+            echo "${FISH_LINE}" >> "${FISH_CONFIG}"
+            ADDED_TO="${ADDED_TO} config.fish"
+        fi
+    fi
+
+    # bash / zsh / POSIX
     for RC_FILE in "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.profile"; do
         if [ -f "${RC_FILE}" ]; then
             if ! grep -qF "${INSTALL_DIR}" "${RC_FILE}"; then
@@ -145,7 +160,7 @@ if ! echo "${PATH}" | tr ':' '\n' | grep -qx "${INSTALL_DIR}"; then
         fi
     done
 
-    # If no shell config existed, create .profile
+    # If no shell config existed at all, create .profile
     if [ -z "${ADDED_TO}" ]; then
         echo "# Added by CalmBackup installer" > "${HOME}/.profile"
         echo "${EXPORT_LINE}" >> "${HOME}/.profile"
@@ -153,6 +168,16 @@ if ! echo "${PATH}" | tr ':' '\n' | grep -qx "${INSTALL_DIR}"; then
     fi
 
     info "Added ${INSTALL_DIR} to PATH in:${ADDED_TO}"
+
+    # Detect user's login shell for reload hint
+    USER_SHELL="$(basename "${SHELL:-/bin/bash}")"
+    case "${USER_SHELL}" in
+        fish) RELOAD_CMD="source ${FISH_CONFIG}" ;;
+        zsh)  RELOAD_CMD="source ~/.zshrc" ;;
+        *)    RELOAD_CMD="source ~/.bashrc" ;;
+    esac
+    warn "To use calmbackup in this session, run:  ${RELOAD_CMD}"
+    echo "  Or open a new terminal."
 fi
 
 # --- Config directory ---
