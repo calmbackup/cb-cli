@@ -156,7 +156,11 @@ func (s *Service) Backup(onProgress ProgressFunc) Result {
 		return Result{Error: fmt.Sprintf("encryption failed: %v", err)}
 	}
 
-	// 6. Copy to local path
+	// 6. Catch-up upload (local files not in cloud, before saving new file)
+	s.progress(onProgress, "Checking for un-uploaded backups...")
+	s.catchUpUpload(onProgress)
+
+	// 7. Copy to local path
 	s.progress(onProgress, "Saving local copy...")
 	if err := os.MkdirAll(s.Config.LocalPath, 0755); err != nil {
 		return Result{Error: fmt.Sprintf("failed to create local path: %v", err)}
@@ -166,7 +170,7 @@ func (s *Service) Backup(onProgress ProgressFunc) Result {
 		return Result{Error: fmt.Sprintf("failed to copy to local path: %v", err)}
 	}
 
-	// 7. Compute SHA-256 checksum
+	// 8. Compute SHA-256 checksum
 	checksum, err := sha256sum(localDest)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("failed to compute checksum: %v", err)}
@@ -176,10 +180,6 @@ func (s *Service) Backup(onProgress ProgressFunc) Result {
 	if err != nil {
 		return Result{Error: fmt.Sprintf("failed to stat local file: %v", err)}
 	}
-
-	// 8. Catch-up upload (local files not in cloud)
-	s.progress(onProgress, "Checking for un-uploaded backups...")
-	s.catchUpUpload(onProgress)
 
 	// 9. Request upload URL, upload, confirm
 	s.progress(onProgress, "Uploading backup...")
