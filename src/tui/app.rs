@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{DefaultTerminal, Frame};
 use tokio::sync::mpsc;
@@ -6,6 +6,153 @@ use crate::core::config::Config;
 use crate::core::types::{BackupEntry, Result};
 
 use super::{confirm, dashboard, picker};
+
+/// Labels for backup pipeline steps (must match the order progress messages arrive).
+pub const BACKUP_STEPS: &[&str] = &[
+    "Dumping database",
+    "Verifying dump",
+    "Creating archive",
+    "Encrypting backup",
+    "Syncing backups",
+    "Saving locally",
+    "Computing checksum",
+    "Uploading to cloud",
+    "Pruning old backups",
+];
+
+pub const RESTORE_STEPS: &[&str] = &[
+    "Fetching backup details",
+    "Checking local cache",
+    "Downloading backup",
+    "Decrypting backup",
+    "Extracting archive",
+    "Restoring database",
+    "Restoring directories",
+];
+
+/// Minimum display time per step (ms) so fast steps don't flash invisible.
+const MIN_STEP_MS: u64 = 400;
+/// Minimum display time for encryption step (ms) — the animation needs time to shine.
+const MIN_ENCRYPT_MS: u64 = 1800;
+
+#[derive(Debug, Clone)]
+pub struct ProgressStep {
+    pub label: String,
+    pub status: StepStatus,
+    pub duration: Option<Duration>,
+    pub started_at: Option<Instant>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StepStatus {
+    Pending,
+    Active,
+    Complete,
+}
+
+/// Tracks the full progress pipeline.
+#[derive(Debug, Clone)]
+pub struct ProgressState {
+    pub steps: Vec<ProgressStep>,
+    pub current_step: usize,
+    pub step_visible_since: Option<Instant>,
+    pub pending_advance: bool,
+    pub completed: bool,
+    pub backup_result: Option<crate::core::types::BackupResult>,
+    pub restore_result: Option<crate::core::types::RestoreResult>,
+}
+
+impl ProgressState {
+    pub fn new(step_labels: &[&str]) -> Self {
+        Self {
+            steps: step_labels
+                .iter()
+                .map(|label| ProgressStep {
+                    label: label.to_string(),
+                    status: StepStatus::Pending,
+                    duration: None,
+                    started_at: None,
+                })
+                .collect(),
+            current_step: 0,
+            step_visible_since: None,
+            pending_advance: false,
+            completed: false,
+            backup_result: None,
+            restore_result: None,
+        }
+    }
+
+    /// Called when a new progress message arrives (meaning previous step is done).
+    pub fn advance(&mut self) {
+        if self.current_step == 0 && self.steps[0].status == StepStatus::Pending {
+            self.steps[0].status = StepStatus::Active;
+            self.steps[0].started_at = Some(Instant::now());
+            self.step_visible_since = Some(Instant::now());
+            return;
+        }
+
+        let min_ms = self.min_duration_for_current();
+        let elapsed = self.step_visible_since.map(|t| t.elapsed()).unwrap_or_default();
+
+        if elapsed < Duration::from_millis(min_ms) {
+            self.pending_advance = true;
+        } else {
+            self.do_advance();
+        }
+    }
+
+    /// Actually move to the next step.
+    fn do_advance(&mut self) {
+        self.finalize_current();
+        let next = self.current_step + 1;
+        if next < self.steps.len() {
+            self.current_step = next;
+            self.steps[next].status = StepStatus::Active;
+            self.steps[next].started_at = Some(Instant::now());
+            self.step_visible_since = Some(Instant::now());
+            self.pending_advance = false;
+        }
+    }
+
+    /// Mark the current step as complete.
+    pub fn finalize_current(&mut self) {
+        let idx = self.current_step;
+        if idx < self.steps.len() && self.steps[idx].status == StepStatus::Active {
+            self.steps[idx].status = StepStatus::Complete;
+            self.steps[idx].duration = self.steps[idx].started_at.map(|t| t.elapsed());
+        }
+    }
+
+    /// Called every frame — advances delayed steps when their min time is up.
+    pub fn tick(&mut self) {
+        if self.completed {
+            // Finalize the last step if still active
+            self.finalize_current();
+            return;
+        }
+
+        if self.pending_advance {
+            let min_ms = self.min_duration_for_current();
+            let elapsed = self.step_visible_since.map(|t| t.elapsed()).unwrap_or_default();
+            if elapsed >= Duration::from_millis(min_ms) {
+                self.do_advance();
+            }
+        }
+    }
+
+    fn min_duration_for_current(&self) -> u64 {
+        if self.current_step < self.steps.len() {
+            if self.steps[self.current_step].label.contains("ncrypt") {
+                MIN_ENCRYPT_MS
+            } else {
+                MIN_STEP_MS
+            }
+        } else {
+            MIN_STEP_MS
+        }
+    }
+}
 
 /// Messages sent from background tasks to the TUI.
 #[derive(Debug)]
@@ -53,8 +200,7 @@ pub struct App {
 
     // Progress state
     pub operation_running: bool,
-    pub progress_message: String,
-    pub progress_detail: Option<String>,
+    pub progress: Option<ProgressState>,
 
     // Error state
     pub last_error: Option<String>,
@@ -116,8 +262,7 @@ impl App {
             local_backup_size,
             latest_local,
             operation_running: false,
-            progress_message: String::new(),
-            progress_detail: None,
+            progress: None,
             last_error: None,
             confirm_message: String::new(),
             confirm_cursor: 0,
@@ -147,6 +292,9 @@ impl App {
             while let Ok(msg) = self.rx.try_recv() {
                 self.handle_message(msg);
             }
+
+            // Tick progress: advance delayed steps whose min-display time has elapsed
+            self.tick_progress();
 
             if self.should_quit {
                 break;
@@ -180,6 +328,15 @@ impl App {
     }
 
     fn handle_dashboard_key(&mut self, key: KeyEvent) {
+        // If progress is showing and completed, any key dismisses it
+        if let Some(ref p) = self.progress {
+            if p.completed {
+                self.operation_running = false;
+                self.progress = None;
+                return;
+            }
+        }
+
         match (key.code, key.modifiers) {
             (KeyCode::Char('q'), _) | (KeyCode::Esc, _) => {
                 self.should_quit = true;
@@ -278,39 +435,35 @@ impl App {
     /// Handle a message from a background task.
     fn handle_message(&mut self, msg: AppMessage) {
         match msg {
-            AppMessage::Progress(message, detail) => {
-                self.progress_message = message;
-                self.progress_detail = detail;
+            AppMessage::Progress(_message, _detail) => {
+                if let Some(ref mut p) = self.progress {
+                    p.advance();
+                }
             }
             AppMessage::BackupComplete(result) => {
-                self.operation_running = false;
-                self.progress_message = format!(
-                    "Backup complete: {} ({})",
-                    result.filename,
-                    crate::core::types::format_size(result.size)
-                );
-                self.progress_detail = None;
+                if let Some(ref mut p) = self.progress {
+                    p.finalize_current();
+                    p.completed = true;
+                    p.backup_result = Some(result.clone());
+                }
                 self.last_error = None;
-                // Update local stats
                 self.local_backup_count += 1;
                 self.local_backup_size += result.size;
                 self.latest_local = Some(result.filename);
-                // Refresh backup list from cloud
                 self.refresh_backups();
             }
             AppMessage::RestoreComplete(result) => {
-                self.operation_running = false;
-                self.progress_message = format!(
-                    "Restore complete: {}",
-                    result.filename,
-                );
-                self.progress_detail = None;
+                if let Some(ref mut p) = self.progress {
+                    p.finalize_current();
+                    p.completed = true;
+                    p.restore_result = Some(result);
+                }
                 self.last_error = None;
             }
             AppMessage::Error(err) => {
                 self.operation_running = false;
+                self.progress = None;
                 self.last_error = Some(err);
-                self.progress_detail = None;
             }
             AppMessage::BackupsLoaded(backups) => {
                 self.backups = backups;
@@ -328,11 +481,22 @@ impl App {
         }
     }
 
+    /// Initialize progress state for backup or restore.
+    fn init_progress(&mut self, step_labels: &[&str]) {
+        self.progress = Some(ProgressState::new(step_labels));
+    }
+
+    /// Tick: check if delayed step advances should fire now.
+    fn tick_progress(&mut self) {
+        if let Some(ref mut p) = self.progress {
+            p.tick();
+        }
+    }
+
     /// Start a backup operation in the background.
     fn start_backup(&mut self) {
         self.operation_running = true;
-        self.progress_message = "Starting backup...".to_string();
-        self.progress_detail = None;
+        self.init_progress(BACKUP_STEPS);
         self.last_error = None;
 
         let tx = self.tx.clone();
@@ -383,8 +547,7 @@ impl App {
     /// Start a restore operation in the background.
     fn start_restore(&mut self, backup_id: String) {
         self.operation_running = true;
-        self.progress_message = "Starting restore...".to_string();
-        self.progress_detail = None;
+        self.init_progress(RESTORE_STEPS);
         self.last_error = None;
 
         let tx = self.tx.clone();
