@@ -48,11 +48,29 @@ fn draw_header(app: &App, frame: &mut Frame, area: Rect) {
         Span::styled(tagline, theme::label_style()),
     ];
 
-    if let Some(ref tag) = app.update_available {
+    if app.update_done {
         spans.push(Span::raw("    "));
         spans.push(Span::styled(
-            format!("Update available: {}", tag),
-            Style::default().fg(theme::BRAND_YELLOW).add_modifier(Modifier::BOLD),
+            "\u{2713} Updated — restart to use new version",
+            Style::default().fg(theme::BRAND_GREEN).add_modifier(Modifier::BOLD),
+        ));
+    } else if app.updating {
+        let dots = ".".repeat(
+            (std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() / 400 % 4) as usize,
+        );
+        spans.push(Span::raw("    "));
+        spans.push(Span::styled(
+            format!("{}{}", app.update_step, dots),
+            Style::default().fg(theme::BRAND_CYAN),
+        ));
+    } else if let Some(ref tag) = app.update_available {
+        spans.push(Span::raw("    "));
+        spans.push(Span::styled(
+            format!("Updating to {}...", tag),
+            Style::default().fg(theme::BRAND_YELLOW),
         ));
     }
 

@@ -170,6 +170,12 @@ pub enum AppMessage {
     Error(String),
     /// A newer version is available.
     UpdateAvailable(String),
+    /// Update progress step.
+    UpdateProgress(String),
+    /// Update completed.
+    UpdateComplete,
+    /// Update failed.
+    UpdateFailed(String),
     /// Backup list refreshed.
     BackupsLoaded(Vec<BackupEntry>),
     /// API connectivity status.
@@ -210,8 +216,11 @@ pub struct App {
     // Error state
     pub last_error: Option<String>,
 
-    // Update notice
+    // Update state
     pub update_available: Option<String>,
+    pub updating: bool,
+    pub update_step: String,
+    pub update_done: bool,
 
     // Confirm dialog state
     pub confirm_message: String,
@@ -273,6 +282,9 @@ impl App {
             progress: None,
             last_error: None,
             update_available: None,
+            updating: false,
+            update_step: String::new(),
+            update_done: false,
             confirm_message: String::new(),
             confirm_cursor: 0,
             rx,
@@ -487,7 +499,21 @@ impl App {
                 self.api_connected = true;
             }
             AppMessage::UpdateAvailable(tag) => {
-                self.update_available = Some(tag);
+                self.update_available = Some(tag.clone());
+                // Auto-start the update
+                self.start_update(tag);
+            }
+            AppMessage::UpdateProgress(step) => {
+                self.update_step = step;
+            }
+            AppMessage::UpdateComplete => {
+                self.updating = false;
+                self.update_done = true;
+                self.update_available = None;
+            }
+            AppMessage::UpdateFailed(err) => {
+                self.updating = false;
+                self.last_error = Some(format!("Update failed: {}", err));
             }
         }
     }
@@ -671,6 +697,37 @@ impl App {
             if let Ok((tag, needs_update)) = crate::core::updater::check(&version).await {
                 if needs_update {
                     let _ = tx.send(AppMessage::UpdateAvailable(tag));
+                }
+            }
+        });
+    }
+
+    /// Download and install the update.
+    fn start_update(&mut self, tag: String) {
+        if self.updating {
+            return;
+        }
+        self.updating = true;
+        self.update_step = "Downloading update...".to_string();
+
+        let tx = self.tx.clone();
+
+        tokio::spawn(async move {
+            let _ = tx.send(AppMessage::UpdateProgress("Downloading update...".to_string()));
+
+            // Small delay so the user sees the message
+            tokio::time::sleep(Duration::from_millis(500)).await;
+
+            let _ = tx.send(AppMessage::UpdateProgress("Installing update...".to_string()));
+
+            match crate::core::updater::update(&tag).await {
+                Ok(()) => {
+                    let _ = tx.send(AppMessage::UpdateProgress("Update installed".to_string()));
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    let _ = tx.send(AppMessage::UpdateComplete);
+                }
+                Err(e) => {
+                    let _ = tx.send(AppMessage::UpdateFailed(e.to_string()));
                 }
             }
         });
