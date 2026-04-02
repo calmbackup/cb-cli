@@ -21,7 +21,7 @@ pub fn draw(app: &App, frame: &mut Frame, area: Rect) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),  // header
-            Constraint::Length(6),  // status panel
+            Constraint::Length(8),  // status panel (with padding)
             Constraint::Min(5),    // backup list / progress
             Constraint::Length(1), // keybind bar
         ])
@@ -86,6 +86,11 @@ fn draw_header(app: &App, frame: &mut Frame, area: Rect) {
     frame.render_widget(header, area);
 }
 
+/// Fixed-width label helper — right-pads the label so values align.
+fn status_label(label: &str, width: usize) -> Span<'static> {
+    Span::styled(format!("{:>width$}  ", label, width = width), theme::label_style())
+}
+
 /// Render the status overview panel.
 fn draw_status(app: &App, frame: &mut Frame, area: Rect) {
     let block = Block::default()
@@ -96,13 +101,21 @@ fn draw_status(app: &App, frame: &mut Frame, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Split inner area into 2 rows
+    // Vertical layout: top padding, row 1, spacing, row 2, bottom padding
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(1), // top padding
+            Constraint::Length(1), // row 1
+            Constraint::Length(1), // spacing
+            Constraint::Length(1), // row 2
+            Constraint::Min(0),   // bottom padding
+        ])
         .split(inner);
 
-    // Row 1: Last backup | Local backups | Cloud status
+    let label_width = 12; // fixed width for all labels
+
+    // Row 1: Last backup | Local | Cloud
     let row1_cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -110,7 +123,7 @@ fn draw_status(app: &App, frame: &mut Frame, area: Rect) {
             Constraint::Percentage(30),
             Constraint::Percentage(30),
         ])
-        .split(rows[0]);
+        .split(rows[1]);
 
     // Last backup
     let last_backup_text = match &app.account {
@@ -118,27 +131,26 @@ fn draw_status(app: &App, frame: &mut Frame, area: Rect) {
             Some(ts) => format_time(ts),
             None => "Never".to_string(),
         },
-        None => "Loading...".to_string(),
+        None => "...".to_string(),
     };
     let last_backup = Line::from(vec![
-        Span::styled("  Last backup: ", theme::label_style()),
+        Span::raw("  "),
+        status_label("Last backup", label_width),
         Span::styled(last_backup_text, theme::value_style()),
     ]);
     frame.render_widget(Paragraph::new(last_backup), row1_cols[0]);
 
-    // Local backups
     let local_text = format!(
         "{} files \u{00b7} {}",
         app.local_backup_count,
         format_size(app.local_backup_size),
     );
     let local_line = Line::from(vec![
-        Span::styled("Local: ", theme::label_style()),
+        status_label("Local", label_width),
         Span::styled(local_text, theme::value_style()),
     ]);
     frame.render_widget(Paragraph::new(local_line), row1_cols[1]);
 
-    // Cloud status
     let (cloud_icon, cloud_style) = if app.api_connected {
         ("\u{2713} ", theme::success_style())
     } else {
@@ -150,7 +162,7 @@ fn draw_status(app: &App, frame: &mut Frame, area: Rect) {
         .map(|a| format!("{} backups", a.backup_count))
         .unwrap_or_else(|| "...".to_string());
     let cloud_line = Line::from(vec![
-        Span::styled("Cloud: ", theme::label_style()),
+        status_label("Cloud", label_width),
         Span::styled(cloud_icon, cloud_style),
         Span::styled(cloud_count, theme::value_style()),
     ]);
@@ -164,15 +176,13 @@ fn draw_status(app: &App, frame: &mut Frame, area: Rect) {
             Constraint::Percentage(30),
             Constraint::Percentage(30),
         ])
-        .split(rows[1]);
+        .split(rows[3]);
 
     let retention = Line::from(vec![
+        Span::raw("  "),
+        status_label("Retention", label_width),
         Span::styled(
-            format!("  Retention: ", ),
-            theme::label_style(),
-        ),
-        Span::styled(
-            format!("{}d", app.config.local_retention_days),
+            format!("{} days", app.config.local_retention_days),
             theme::value_style(),
         ),
     ]);
@@ -185,21 +195,20 @@ fn draw_status(app: &App, frame: &mut Frame, area: Rect) {
         other => other,
     };
     let db_line = Line::from(vec![
-        Span::styled("DB: ", theme::label_style()),
+        status_label("Database", label_width),
         Span::styled(driver_label, theme::value_style()),
     ]);
     frame.render_widget(Paragraph::new(db_line), row2_cols[1]);
 
-    // Truncate path if too long
     let path = &app.config.local_path;
-    let max_len = row2_cols[2].width.saturating_sub(8) as usize;
+    let max_len = row2_cols[2].width.saturating_sub(label_width as u16 + 4) as usize;
     let display_path = if path.len() > max_len && max_len > 3 {
         format!("..{}", &path[path.len() - (max_len - 2)..])
     } else {
         path.clone()
     };
     let path_line = Line::from(vec![
-        Span::styled("Path: ", theme::label_style()),
+        status_label("Path", label_width),
         Span::styled(display_path, theme::value_style()),
     ]);
     frame.render_widget(Paragraph::new(path_line), row2_cols[2]);
