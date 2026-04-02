@@ -67,7 +67,19 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         // No subcommand → launch TUI dashboard
         None => {
-            todo!("Load config, derive key, create App, init terminal, run TUI")
+            let config_path = match config_path {
+                Some(p) => std::path::PathBuf::from(p),
+                None => core::config::Config::find_config_file()
+                    .ok_or_else(|| anyhow::anyhow!("No config file found. Run `calmbackup init` to create one."))?,
+            };
+            let config = core::config::Config::load(&config_path)?;
+            let key = core::crypto::derive_key(&config.encryption_key);
+            let app = tui::app::App::new(config, key, VERSION.to_string());
+
+            let mut terminal = ratatui::init();
+            let result = app.run(&mut terminal).await;
+            ratatui::restore();
+            result?;
         }
 
         // Subcommands → CLI mode

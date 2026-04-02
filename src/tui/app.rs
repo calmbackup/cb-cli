@@ -1,5 +1,5 @@
 use std::time::Duration;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{DefaultTerminal, Frame};
 use tokio::sync::mpsc;
 use crate::core::config::Config;

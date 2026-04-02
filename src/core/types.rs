@@ -3,7 +3,7 @@ use thiserror::Error;
 
 /// Progress callback for long-running operations.
 /// Called with (step_description, optional_detail).
-pub type ProgressFn = Box<dyn Fn(&str, Option<&str>) + Send>;
+pub type ProgressFn = Box<dyn Fn(&str, Option<&str>) + Send + Sync>;
 
 /// Result of a completed backup operation.
 #[derive(Debug, Clone)]

@@ -305,7 +305,7 @@ fn draw_backup_list(app: &App, frame: &mut Frame, area: Rect) {
             ])
             .style(theme::label_style()),
         )
-        .highlight_style(theme::selected_style());
+        .row_highlight_style(theme::selected_style());
 
     frame.render_widget(table, table_area[0]);
 

@@ -28,7 +28,7 @@ pub async fn execute(config_path: Option<&str>, mode: OutputMode) -> Result<()> 
     };
 
     // Build progress callback based on output mode
-    let progress: Box<dyn Fn(&str, Option<&str>) + Send> = match mode {
+    let progress: Box<dyn Fn(&str, Option<&str>) + Send + Sync> = match mode {
         OutputMode::Styled => Box::new(|msg: &str, _detail: Option<&str>| {
             output::print_step(msg);
         }),

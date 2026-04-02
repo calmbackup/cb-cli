@@ -55,7 +55,7 @@ impl RestoreService {
         &self,
         backup_id: &str,
         prune_local: bool,
-        on_progress: &dyn Fn(&str, Option<&str>),
+        on_progress: &(dyn Fn(&str, Option<&str>) + Send + Sync),
         temp_dir: &Path,
     ) -> Result<(String, String)> {
         // Step 1: Fetch backup details

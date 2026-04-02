@@ -52,7 +52,7 @@ impl BackupService {
     async fn backup_inner(
         &self,
         temp_dir: &Path,
-        on_progress: &dyn Fn(&str, Option<&str>),
+        on_progress: &(dyn Fn(&str, Option<&str>) + Send + Sync),
     ) -> Result<(String, u64, String)> {
         // Step 2: Dump database
         on_progress("Dumping database...", None);
