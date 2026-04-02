@@ -56,7 +56,8 @@ pub struct ProgressState {
     pub steps: Vec<ProgressStep>,
     pub current_step: usize,
     pub step_visible_since: Option<Instant>,
-    pub pending_advance: bool,
+    /// Number of advances queued (messages arrived while min-display time not yet elapsed).
+    pub pending_advances: usize,
     pub completed: bool,
     pub backup_result: Option<crate::core::types::BackupResult>,
     pub restore_result: Option<crate::core::types::RestoreResult>,
@@ -76,7 +77,7 @@ impl ProgressState {
                 .collect(),
             current_step: 0,
             step_visible_since: None,
-            pending_advance: false,
+            pending_advances: 0,
             completed: false,
             backup_result: None,
             restore_result: None,
@@ -96,7 +97,7 @@ impl ProgressState {
         let elapsed = self.step_visible_since.map(|t| t.elapsed()).unwrap_or_default();
 
         if elapsed < Duration::from_millis(min_ms) {
-            self.pending_advance = true;
+            self.pending_advances += 1;
         } else {
             self.do_advance();
         }
@@ -111,7 +112,9 @@ impl ProgressState {
             self.steps[next].status = StepStatus::Active;
             self.steps[next].started_at = Some(Instant::now());
             self.step_visible_since = Some(Instant::now());
-            self.pending_advance = false;
+            if self.pending_advances > 0 {
+                self.pending_advances -= 1;
+            }
         }
     }
 
@@ -132,7 +135,7 @@ impl ProgressState {
             return;
         }
 
-        if self.pending_advance {
+        if self.pending_advances > 0 {
             let min_ms = self.min_duration_for_current();
             let elapsed = self.step_visible_since.map(|t| t.elapsed()).unwrap_or_default();
             if elapsed >= Duration::from_millis(min_ms) {

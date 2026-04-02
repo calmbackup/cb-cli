@@ -6,11 +6,25 @@ use ratatui::widgets::{Block, Borders, Gauge, Paragraph};
 use crate::tui::app::{App, ProgressState, StepStatus};
 use crate::tui::theme;
 
-/// Matrix green palette — different intensities for the encryption animation.
-const MATRIX_BRIGHT: Color = Color::Rgb(0, 255, 65);
-const MATRIX_MID: Color = Color::Rgb(0, 200, 50);
-const MATRIX_DIM: Color = Color::Rgb(0, 140, 35);
-const MATRIX_FAINT: Color = Color::Rgb(0, 80, 20);
+/// Muted terminal green palette for encryption animation.
+const CRYPT_BRIGHT: Color = Color::Rgb(100, 160, 100);
+const CRYPT_MID: Color = Color::Rgb(70, 120, 70);
+const CRYPT_DIM: Color = Color::Rgb(50, 90, 50);
+const CRYPT_FAINT: Color = Color::Rgb(35, 60, 35);
+
+/// Source text that gets "encrypted" — fragments of readable data morphing into hex.
+const PLAINTEXT_FRAGMENTS: &[&str] = &[
+    "SELECT * FROM users",
+    "INSERT INTO backups",
+    "database.sqlite",
+    "encryption_key",
+    "created_at timestamp",
+    "DROP TABLE sessions",
+    "BEGIN TRANSACTION",
+    "COMMIT",
+    "api_key varchar(64)",
+    "password_hash text",
+];
 
 /// Render the full progress view: step checklist + encryption animation + gauge bar.
 pub fn draw(app: &App, frame: &mut Frame, area: Rect) {
@@ -51,7 +65,7 @@ pub fn draw(app: &App, frame: &mut Frame, area: Rect) {
     let constraints = if encrypt_active {
         vec![
             Constraint::Length(progress.steps.len() as u16 + 1),
-            Constraint::Length(6),
+            Constraint::Length(5),
             Constraint::Min(0),
             Constraint::Length(1),
         ]
@@ -146,7 +160,7 @@ fn draw_steps(progress: &ProgressState, frame: &mut Frame, area: Rect) {
     frame.render_widget(Paragraph::new(lines), area);
 }
 
-/// Draw the matrix-style encryption animation — green monochrome hex rain.
+/// Draw the encryption animation — readable text morphing character-by-character into hex.
 fn draw_encryption_animation(frame: &mut Frame, area: Rect) {
     let time_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -160,41 +174,70 @@ fn draw_encryption_animation(frame: &mut Frame, area: Rect) {
         height: area.height,
     };
 
+    let usable_width = animation_area.width.saturating_sub(6) as usize;
     let hex_chars: &[u8] = b"0123456789abcdef";
+
+    // How far through the encryption we are (cycles every ~3s)
+    let cycle_ms = 3000u128;
+    let progress_in_cycle = (time_ms % cycle_ms) as f64 / cycle_ms as f64;
+
     let mut lines: Vec<Line> = Vec::new();
 
-    for row in 0..3u128 {
+    for row in 0..2u128 {
+        // Pick a plaintext fragment for this row (cycles through them)
+        let frag_idx = ((time_ms / cycle_ms + row) as usize) % PLAINTEXT_FRAGMENTS.len();
+        let plaintext = PLAINTEXT_FRAGMENTS[frag_idx];
+
+        // Pad or truncate to fill the row
+        let padded: String = if plaintext.len() >= usable_width {
+            plaintext[..usable_width].to_string()
+        } else {
+            format!("{:width$}", plaintext, width = usable_width)
+        };
+
         let mut spans: Vec<Span> = Vec::new();
         spans.push(Span::styled("  ", Style::default()));
 
-        let bytes_per_row = ((animation_area.width as usize).saturating_sub(4)) / 3;
-        for col in 0..bytes_per_row {
-            let col = col as u128;
-            // Pseudo-random based on time — changes every ~80ms for fluid animation
-            let frame_seed = time_ms / 80;
-            let hash = frame_seed
-                .wrapping_mul(31)
-                .wrapping_add(row.wrapping_mul(97))
-                .wrapping_add(col.wrapping_mul(53))
+        let chars: Vec<char> = padded.chars().collect();
+        for (col, &ch) in chars.iter().enumerate() {
+            // Each character has a threshold — when progress passes it, it becomes hex
+            // Characters encrypt left-to-right with some randomness
+            let col_u128 = col as u128;
+            let char_hash = col_u128
+                .wrapping_mul(7919)
+                .wrapping_add(row.wrapping_mul(104729))
                 .wrapping_mul(1103515245)
                 .wrapping_add(12345);
-            let b1 = hex_chars[((hash >> 4) % 16) as usize];
-            let b2 = hex_chars[((hash >> 8) % 16) as usize];
+            let jitter = (char_hash % 30) as f64 / 100.0; // 0.0–0.3 random offset
+            let threshold = (col as f64 / chars.len() as f64) * 0.7 + jitter;
 
-            // Vary green intensity — some bytes "glow" brighter
-            let intensity_hash = hash.wrapping_mul(7);
-            let color = match intensity_hash % 7 {
-                0 => MATRIX_BRIGHT,
-                1 | 2 => MATRIX_MID,
-                3 | 4 => MATRIX_DIM,
-                _ => MATRIX_FAINT,
-            };
+            if progress_in_cycle > threshold {
+                // This character is "encrypted" — show as hex
+                let hex_seed = time_ms / 120; // changes every 120ms
+                let h = hex_seed
+                    .wrapping_add(col_u128.wrapping_mul(53))
+                    .wrapping_add(row.wrapping_mul(97))
+                    .wrapping_mul(1103515245);
+                let hc = hex_chars[((h >> 4) % 16) as usize] as char;
 
-            spans.push(Span::styled(
-                format!("{}{}", b1 as char, b2 as char),
-                Style::default().fg(color),
-            ));
-            spans.push(Span::styled(" ", Style::default()));
+                let color = match (char_hash / 7) % 4 {
+                    0 => CRYPT_BRIGHT,
+                    1 => CRYPT_MID,
+                    2 => CRYPT_DIM,
+                    _ => CRYPT_FAINT,
+                };
+
+                spans.push(Span::styled(
+                    String::from(hc),
+                    Style::default().fg(color),
+                ));
+            } else {
+                // Still plaintext
+                spans.push(Span::styled(
+                    String::from(ch),
+                    Style::default().fg(theme::BRAND_DIM),
+                ));
+            }
         }
 
         lines.push(Line::from(spans));
@@ -202,13 +245,13 @@ fn draw_encryption_animation(frame: &mut Frame, area: Rect) {
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "    AES-256-GCM \u{00b7} zero-knowledge encryption",
-        Style::default().fg(MATRIX_DIM).add_modifier(Modifier::ITALIC),
+        "    AES-256-GCM \u{00b7} zero-knowledge",
+        Style::default().fg(CRYPT_DIM),
     )));
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(MATRIX_FAINT));
+        .border_style(Style::default().fg(CRYPT_FAINT));
 
     frame.render_widget(Paragraph::new(lines).block(block), animation_area);
 }
