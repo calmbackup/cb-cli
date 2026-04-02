@@ -36,35 +36,104 @@ fn default_retention_days() -> u32 {
     7
 }
 
+fn is_root() -> bool {
+    // Check effective UID via environment; fallback to checking USER env var
+    std::env::var("EUID")
+        .or_else(|_| std::env::var("UID"))
+        .map(|uid| uid == "0")
+        .unwrap_or_else(|_| {
+            std::env::var("USER")
+                .map(|u| u == "root")
+                .unwrap_or(false)
+        })
+}
+
 impl Config {
     /// Load and validate config from a specific path.
     pub fn load(path: &Path) -> Result<Self> {
-        todo!("Load YAML config from path, validate required fields")
+        let contents = std::fs::read_to_string(path).map_err(|e| {
+            AppError::Config(format!("Failed to read config file {}: {}", path.display(), e))
+        })?;
+        let mut config: Config = serde_yaml::from_str(&contents).map_err(|e| {
+            AppError::Config(format!("Failed to parse config file: {}", e))
+        })?;
+        config.validate()?;
+        if config.local_path.is_empty() {
+            config.local_path = Self::local_path_default().to_string_lossy().to_string();
+        }
+        Ok(config)
     }
 
     /// Load config without full validation (for partial use like notifications).
     pub fn load_partial(path: &Path) -> Result<Self> {
-        todo!("Load YAML config without validation")
+        let contents = std::fs::read_to_string(path).map_err(|e| {
+            AppError::Config(format!("Failed to read config file {}: {}", path.display(), e))
+        })?;
+        let mut config: Config = serde_yaml::from_str(&contents).map_err(|e| {
+            AppError::Config(format!("Failed to parse config file: {}", e))
+        })?;
+        if config.local_path.is_empty() {
+            config.local_path = Self::local_path_default().to_string_lossy().to_string();
+        }
+        Ok(config)
     }
 
     /// Find config file by searching standard locations.
-    /// Order: --config flag > /etc/calmbackup/calmbackup.yaml > ~/.config/calmbackup/calmbackup.yaml > ./calmbackup.yaml
+    /// Order: /etc/calmbackup/calmbackup.yaml > ~/.config/calmbackup/calmbackup.yaml > ./calmbackup.yaml
     pub fn find_config_file() -> Option<PathBuf> {
-        todo!("Search standard config locations")
+        let candidates: Vec<Option<PathBuf>> = vec![
+            Some(PathBuf::from("/etc/calmbackup/calmbackup.yaml")),
+            dirs::home_dir()
+                .map(|h| h.join(".config/calmbackup/calmbackup.yaml")),
+            Some(PathBuf::from("./calmbackup.yaml")),
+        ];
+        for candidate in candidates {
+            if let Some(path) = candidate {
+                if path.exists() {
+                    return Some(path);
+                }
+            }
+        }
+        None
     }
 
     /// Return the config directory based on effective user (root vs normal).
     pub fn config_dir() -> PathBuf {
-        todo!("Return /etc/calmbackup or ~/.config/calmbackup")
+        if is_root() {
+            PathBuf::from("/etc/calmbackup")
+        } else {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("~"))
+                .join(".config/calmbackup")
+        }
     }
 
     /// Return the local backup storage directory.
     pub fn local_path_default() -> PathBuf {
-        todo!("Return /var/backups/calmbackup or ~/.local/share/calmbackup")
+        if is_root() {
+            PathBuf::from("/var/backups/calmbackup")
+        } else {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("~"))
+                .join(".local/share/calmbackup")
+        }
     }
 
     /// Validate all required fields are present and valid.
     fn validate(&self) -> Result<()> {
-        todo!("Validate api_key, encryption_key, database.driver")
+        if self.api_key.is_empty() {
+            return Err(AppError::Config("api_key is required".to_string()));
+        }
+        if self.encryption_key.is_empty() {
+            return Err(AppError::Config("encryption_key is required".to_string()));
+        }
+        let valid_drivers = ["mysql", "pgsql", "sqlite"];
+        if !valid_drivers.contains(&self.database.driver.as_str()) {
+            return Err(AppError::Config(format!(
+                "Invalid database driver '{}'. Must be one of: mysql, pgsql, sqlite",
+                self.database.driver
+            )));
+        }
+        Ok(())
     }
 }
