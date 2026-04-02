@@ -1,23 +1,30 @@
 BINARY_NAME=calmbackup
 VERSION?=dev
-LDFLAGS=-ldflags "-X main.version=$(VERSION)"
-GOBIN?=$(shell go env GOPATH)/bin
 
-.PHONY: build test test-int lint ci clean
+.PHONY: build test release clean
 
 build:
-	go build $(LDFLAGS) -o bin/$(BINARY_NAME) .
+	cargo build --release
+	mkdir -p bin
+	cp target/release/$(BINARY_NAME) bin/$(BINARY_NAME)
 
 test:
-	go test ./... -v
+	cargo test
 
-test-int:
-	go test -tags=integration ./... -v
+release: release-linux-amd64 release-linux-arm64
 
-lint:
-	golangci-lint run ./...
+release-linux-amd64:
+	cargo build --release --target x86_64-unknown-linux-gnu
+	mkdir -p dist
+	tar -czf dist/$(BINARY_NAME)_$(VERSION)_linux_amd64.tar.gz \
+		-C target/x86_64-unknown-linux-gnu/release $(BINARY_NAME)
 
-ci: lint test build
+release-linux-arm64:
+	cross build --release --target aarch64-unknown-linux-gnu
+	mkdir -p dist
+	tar -czf dist/$(BINARY_NAME)_$(VERSION)_linux_arm64.tar.gz \
+		-C target/aarch64-unknown-linux-gnu/release $(BINARY_NAME)
 
 clean:
-	rm -rf bin/
+	cargo clean
+	rm -rf bin/ dist/

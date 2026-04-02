@@ -47,6 +47,7 @@ pub async fn update(latest_tag: &str) -> Result<()> {
         other => other,
     };
     let arch = match std::env::consts::ARCH {
+        "x86_64" => "amd64",
         "aarch64" => "arm64",
         other => other,
     };

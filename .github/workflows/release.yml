@@ -9,24 +9,66 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: linux_amd64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: linux_arm64
+
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          go-version: '1.24'
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Run tests
-        run: go test ./...
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: cargo test
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          version: '~> v2'
-          args: release --clean
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Package
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          TARBALL="calmbackup_${VERSION}_${{ matrix.name }}.tar.gz"
+          tar -czf "${TARBALL}" -C target/${{ matrix.target }}/release calmbackup
+          echo "TARBALL=${TARBALL}" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ env.TARBALL }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "*.tar.gz"
+          generate_release_notes: true
