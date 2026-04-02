@@ -489,6 +489,7 @@ impl App {
                     let _ = tx.send(AppMessage::AccountLoaded(info));
                 }
                 Err(_) => {
+                    // Transient API error — don't show to user, just mark disconnected
                     let _ = tx.send(AppMessage::ApiStatus(false));
                 }
             }

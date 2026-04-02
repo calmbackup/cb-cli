@@ -50,14 +50,17 @@ impl DatabaseDumper for MysqlDumper {
 
         let output_file = File::create(output_path)?;
 
-        let output = Command::new("mysqldump")
-            .arg("--single-transaction")
+        let mut cmd = Command::new("mysqldump");
+        cmd.arg("--single-transaction")
             .arg("--routines")
             .arg("--triggers")
             .arg(format!("-h{}", self.host))
             .arg(format!("-P{}", self.port))
-            .arg(format!("-u{}", self.username))
-            .arg(format!("-p{}", self.password))
+            .arg(format!("-u{}", self.username));
+        if !self.password.is_empty() {
+            cmd.arg(format!("-p{}", self.password));
+        }
+        let output = cmd
             .arg(&self.database)
             .stdout(output_file)
             .output()
@@ -83,11 +86,14 @@ impl DatabaseDumper for MysqlDumper {
 
         let input_file = File::open(dump_path)?;
 
-        let output = Command::new("mysql")
-            .arg(format!("-h{}", self.host))
+        let mut cmd = Command::new("mysql");
+        cmd.arg(format!("-h{}", self.host))
             .arg(format!("-P{}", self.port))
-            .arg(format!("-u{}", self.username))
-            .arg(format!("-p{}", self.password))
+            .arg(format!("-u{}", self.username));
+        if !self.password.is_empty() {
+            cmd.arg(format!("-p{}", self.password));
+        }
+        let output = cmd
             .arg(&self.database)
             .stdin(input_file)
             .output()
