@@ -10,7 +10,7 @@ pub fn create(dump_path: &Path, directories: &[String], output_path: &Path) -> R
     use std::fs::File;
 
     let file = File::create(output_path)?;
-    let encoder = GzEncoder::new(file, Compression::default());
+    let encoder = GzEncoder::new(file, Compression::Default);
     let mut builder = tar::Builder::new(encoder);
 
     // Add the dump file at the archive root using its basename

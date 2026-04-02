@@ -1,4 +1,8 @@
 use std::io::Write;
+use std::path::PathBuf;
+
+use crate::core::config::Config;
+use crate::core::types::{AppError, Result};
 
 /// Output mode determined by TTY detection and flags.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -27,39 +31,72 @@ impl OutputMode {
 /// 2-space left padding for all styled output.
 const PAD: &str = "  ";
 
+// ANSI escape codes
+const CYAN: &str = "\x1b[36m";
+const GREEN: &str = "\x1b[32m";
+const BOLD: &str = "\x1b[1m";
+const DIM: &str = "\x1b[2m";
+const UNDERLINE: &str = "\x1b[4m";
+const RESET: &str = "\x1b[0m";
+
 /// Print the branded header with a random tagline.
 pub fn print_header() {
-    todo!("Print 🪷 Calm Backup header with random tagline")
+    use rand::Rng;
+    let tagline = TAGLINES[rand::thread_rng().gen_range(0..TAGLINES.len())];
+    println!("{PAD}{BOLD}{GREEN}🪷 Calm Backup{RESET}  {DIM}{tagline}{RESET}");
+    println!();
 }
 
 /// Print a progress step: "  → message" in cyan.
 pub fn print_step(msg: &str) {
-    todo!("Print step with cyan arrow")
+    println!("{PAD}{CYAN}→{RESET} {msg}");
 }
 
 /// Print a completion: "  ✓ message" in green.
 pub fn print_done(msg: &str) {
-    todo!("Print done with green checkmark")
+    println!("{PAD}{GREEN}✓{RESET} {msg}");
 }
 
 /// Print an info line with padding.
 pub fn print_info(msg: &str) {
-    todo!("Print padded info line")
+    println!("{PAD}{msg}");
 }
 
 /// Print a key-value label line.
 pub fn print_label(label: &str, value: &str) {
-    todo!("Print label-value pair with faint label")
+    println!("{PAD}{DIM}{label}{RESET}  {value}");
 }
 
 /// Print a section header with underline.
 pub fn print_section(title: &str) {
-    todo!("Print bold underlined section header")
+    println!();
+    println!("{PAD}{BOLD}{UNDERLINE}{title}{RESET}");
 }
 
 /// Print a success banner: "  🪷 message" in bold green.
 pub fn print_success(msg: &str) {
-    todo!("Print success banner")
+    println!();
+    println!("{PAD}{BOLD}{GREEN}🪷 {msg}{RESET}");
+    println!();
+}
+
+/// Load config from the given path or auto-detect.
+pub fn load_config(config_path: Option<&str>) -> Result<Config> {
+    let path = match config_path {
+        Some(p) => PathBuf::from(p),
+        None => Config::find_config_file()
+            .ok_or_else(|| AppError::Config("No config file found. Run 'calmbackup init' first.".into()))?,
+    };
+    Config::load(&path)
+}
+
+/// Prompt the user for a line of text input.
+pub fn prompt(message: &str) -> Result<String> {
+    print!("{PAD}{message}");
+    std::io::stdout().flush()?;
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    Ok(input.trim().to_string())
 }
 
 /// Random taglines for the branded header.

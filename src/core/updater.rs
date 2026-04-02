@@ -1,5 +1,4 @@
 use std::io::Read;
-use std::path::PathBuf;
 
 use crate::core::types::{AppError, Result};
 
