@@ -1,5 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 use crate::core::types::{format_size, format_time};
@@ -38,14 +39,24 @@ fn draw_header(app: &App, frame: &mut Frame, area: Rect) {
     let tagline_idx = app.version.len() % TAGLINES.len();
     let tagline = TAGLINES[tagline_idx];
 
-    let title = Line::from(vec![
+    let mut spans = vec![
         Span::styled(
             format!("  \u{1fab7} Calm Backup v{}", app.version),
             theme::title_style(),
         ),
         Span::raw("    "),
         Span::styled(tagline, theme::label_style()),
-    ]);
+    ];
+
+    if let Some(ref tag) = app.update_available {
+        spans.push(Span::raw("    "));
+        spans.push(Span::styled(
+            format!("Update available: {}", tag),
+            Style::default().fg(theme::BRAND_YELLOW).add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    let title = Line::from(spans);
 
     let header = Paragraph::new(title)
         .block(

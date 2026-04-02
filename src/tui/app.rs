@@ -30,10 +30,10 @@ pub const RESTORE_STEPS: &[&str] = &[
     "Restoring directories",
 ];
 
-/// Minimum display time per step (ms) so fast steps don't flash invisible.
-const MIN_STEP_MS: u64 = 400;
+/// Minimum display time per step (ms) so each step is clearly visible.
+const MIN_STEP_MS: u64 = 2000;
 /// Minimum display time for encryption step (ms) — the animation needs time to shine.
-const MIN_ENCRYPT_MS: u64 = 1800;
+const MIN_ENCRYPT_MS: u64 = 3000;
 
 #[derive(Debug, Clone)]
 pub struct ProgressStep {
@@ -168,6 +168,8 @@ pub enum AppMessage {
     RestoreComplete(crate::core::types::RestoreResult),
     /// Operation failed.
     Error(String),
+    /// A newer version is available.
+    UpdateAvailable(String),
     /// Backup list refreshed.
     BackupsLoaded(Vec<BackupEntry>),
     /// API connectivity status.
@@ -207,6 +209,9 @@ pub struct App {
 
     // Error state
     pub last_error: Option<String>,
+
+    // Update notice
+    pub update_available: Option<String>,
 
     // Confirm dialog state
     pub confirm_message: String,
@@ -267,6 +272,7 @@ impl App {
             operation_running: false,
             progress: None,
             last_error: None,
+            update_available: None,
             confirm_message: String::new(),
             confirm_cursor: 0,
             rx,
@@ -278,6 +284,7 @@ impl App {
     pub async fn run(mut self, terminal: &mut DefaultTerminal) -> Result<()> {
         // Load all initial data in a single task to avoid request bursts
         self.load_initial_data();
+        self.check_for_updates();
 
         loop {
             terminal.draw(|frame| self.draw(frame))?;
@@ -479,6 +486,9 @@ impl App {
                 self.account = Some(info);
                 self.api_connected = true;
             }
+            AppMessage::UpdateAvailable(tag) => {
+                self.update_available = Some(tag);
+            }
         }
     }
 
@@ -645,6 +655,23 @@ impl App {
             );
             if let Ok(backups) = api.list_backups(1, 50).await {
                 let _ = tx.send(AppMessage::BackupsLoaded(backups));
+            }
+        });
+    }
+
+    /// Check for updates in the background.
+    fn check_for_updates(&self) {
+        let tx = self.tx.clone();
+        let version = self.version.clone();
+
+        tokio::spawn(async move {
+            if version == "dev" {
+                return;
+            }
+            if let Ok((tag, needs_update)) = crate::core::updater::check(&version).await {
+                if needs_update {
+                    let _ = tx.send(AppMessage::UpdateAvailable(tag));
+                }
             }
         });
     }
