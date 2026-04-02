@@ -44,6 +44,7 @@ pub struct UploadUrlResponse {
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct AccountInfo {
     pub backup_count: u64,
+    #[serde(alias = "storage_used_bytes")]
     pub storage_used: u64,
     pub last_backup_at: Option<String>,
 }

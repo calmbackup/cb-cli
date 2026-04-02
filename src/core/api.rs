@@ -1,6 +1,12 @@
 use crate::core::types::{AccountInfo, AppError, BackupEntry, Result, UploadUrlResponse};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 
+/// Wrapper for paginated API responses: {"data": [...], "meta": {...}}
+#[derive(serde::Deserialize)]
+struct PaginatedResponse<T> {
+    data: Vec<T>,
+}
+
 /// HTTP client for the CalmBackup API.
 pub struct ApiClient {
     api_key: String,
@@ -134,10 +140,11 @@ impl ApiClient {
             .map_err(|e| AppError::Api(e.to_string()))?;
 
         let response = self.check_response(response).await?;
-        response
-            .json::<Vec<BackupEntry>>()
+        let paginated: PaginatedResponse<BackupEntry> = response
+            .json()
             .await
-            .map_err(|e| AppError::Api(e.to_string()))
+            .map_err(|e| AppError::Api(e.to_string()))?;
+        Ok(paginated.data)
     }
 
     /// Get a single backup's details including download URL.
