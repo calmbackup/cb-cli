@@ -56,3 +56,103 @@ pub fn prune(
 
     Ok(deleted)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    /// Create a unique temp directory for test isolation.
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("cb_prune_test_{}", name));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn deletes_old_confirmed_files() {
+        let dir = temp_dir("delete_old");
+        let filenames = vec![
+            "backup_20260101.tar.gz.enc".to_string(),
+            "backup_20260102.tar.gz.enc".to_string(),
+        ];
+        for f in &filenames {
+            fs::write(dir.join(f), "encrypted data").unwrap();
+        }
+
+        // retention_days=0 means cutoff is now, so any file created before now qualifies
+        let deleted = prune(&dir, 0, &filenames).unwrap();
+        assert_eq!(deleted, 2);
+        assert!(!dir.join(&filenames[0]).exists());
+        assert!(!dir.join(&filenames[1]).exists());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn keeps_recent_files() {
+        let dir = temp_dir("keep_recent");
+        let filenames = vec!["recent.tar.gz.enc".to_string()];
+        fs::write(dir.join(&filenames[0]), "data").unwrap();
+
+        // retention_days=9999 means cutoff is far in the past; files just created are recent
+        let deleted = prune(&dir, 9999, &filenames).unwrap();
+        assert_eq!(deleted, 0);
+        assert!(dir.join(&filenames[0]).exists());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn keeps_unconfirmed_files() {
+        let dir = temp_dir("keep_unconfirmed");
+        let filename = "unconfirmed.tar.gz.enc";
+        fs::write(dir.join(filename), "data").unwrap();
+
+        // Pass empty confirmed list — file should not be deleted even with retention_days=0
+        let deleted = prune(&dir, 0, &[]).unwrap();
+        assert_eq!(deleted, 0);
+        assert!(dir.join(filename).exists());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn ignores_non_matching_extensions() {
+        let dir = temp_dir("non_matching");
+        let files = vec!["notes.txt", "backup.sql", "data.tar.gz", "readme.md"];
+        for f in &files {
+            fs::write(dir.join(f), "content").unwrap();
+        }
+
+        let confirmed: Vec<String> = files.iter().map(|s| s.to_string()).collect();
+        let deleted = prune(&dir, 0, &confirmed).unwrap();
+        assert_eq!(deleted, 0);
+
+        // All files should still exist
+        for f in &files {
+            assert!(dir.join(f).exists());
+        }
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn empty_directory() {
+        let dir = temp_dir("empty");
+        let deleted = prune(&dir, 0, &[]).unwrap();
+        assert_eq!(deleted, 0);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn nonexistent_directory() {
+        let dir = std::env::temp_dir().join("cb_prune_test_nonexistent_xyz");
+        let _ = fs::remove_dir_all(&dir); // ensure it doesn't exist
+        let result = prune(&dir, 7, &[]);
+        assert!(result.is_err());
+    }
+}

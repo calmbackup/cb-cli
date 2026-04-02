@@ -163,3 +163,82 @@ pub struct LocalBackupInfo {
     pub size: u64,
     pub modified: std::time::SystemTime,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_size_zero() {
+        assert_eq!(format_size(0), "0 B");
+    }
+
+    #[test]
+    fn format_size_bytes() {
+        assert_eq!(format_size(512), "512 B");
+    }
+
+    #[test]
+    fn format_size_kilobytes() {
+        assert_eq!(format_size(1024), "1.0 KB");
+    }
+
+    #[test]
+    fn format_size_kilobytes_fractional() {
+        assert_eq!(format_size(1536), "1.5 KB");
+    }
+
+    #[test]
+    fn format_size_megabytes() {
+        assert_eq!(format_size(1_048_576), "1.0 MB");
+    }
+
+    #[test]
+    fn format_size_megabytes_fractional() {
+        assert_eq!(format_size(1_572_864), "1.5 MB");
+    }
+
+    #[test]
+    fn format_size_gigabytes() {
+        assert_eq!(format_size(1_073_741_824), "1.0 GB");
+    }
+
+    #[test]
+    fn format_time_minutes_ago() {
+        use chrono::{Duration, Utc};
+        let ts = (Utc::now() - Duration::minutes(5)).to_rfc3339();
+        let result = format_time(&ts);
+        assert!(result.contains("5m ago"), "expected '5m ago' in: {}", result);
+    }
+
+    #[test]
+    fn format_time_hours_ago() {
+        use chrono::{Duration, Utc};
+        let ts = (Utc::now() - Duration::hours(2)).to_rfc3339();
+        let result = format_time(&ts);
+        assert!(result.contains("2h ago"), "expected '2h ago' in: {}", result);
+    }
+
+    #[test]
+    fn format_time_days_ago() {
+        use chrono::{Duration, Utc};
+        let ts = (Utc::now() - Duration::days(3)).to_rfc3339();
+        let result = format_time(&ts);
+        assert!(result.contains("3d ago"), "expected '3d ago' in: {}", result);
+    }
+
+    #[test]
+    fn format_time_months_ago() {
+        use chrono::{Duration, Utc};
+        let ts = (Utc::now() - Duration::days(90)).to_rfc3339();
+        let result = format_time(&ts);
+        assert!(result.contains("3mo ago"), "expected '3mo ago' in: {}", result);
+    }
+
+    #[test]
+    fn format_time_malformed_does_not_panic() {
+        let result = format_time("not-a-timestamp");
+        // Should not panic; returns something with "just now" since it falls back to Utc::now()
+        assert!(!result.is_empty());
+    }
+}
