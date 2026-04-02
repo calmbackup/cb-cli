@@ -273,10 +273,8 @@ impl App {
 
     /// Run the TUI application main loop.
     pub async fn run(mut self, terminal: &mut DefaultTerminal) -> Result<()> {
-        // Spawn initial data loading tasks
-        self.refresh_backups();
-        self.check_health();
-        self.load_account();
+        // Load all initial data in a single task to avoid request bursts
+        self.load_initial_data();
 
         loop {
             terminal.draw(|frame| self.draw(frame))?;
@@ -595,7 +593,42 @@ impl App {
         });
     }
 
-    /// Refresh the backup list from API.
+    /// Load all initial data sequentially in one task to avoid request bursts.
+    fn load_initial_data(&self) {
+        let tx = self.tx.clone();
+        let config = self.config.clone();
+        let version = self.version.clone();
+
+        tokio::spawn(async move {
+            let api = crate::core::api::ApiClient::new(
+                &config.api_key,
+                &config.api_url,
+                &version,
+            );
+
+            // 1. Account info (also serves as health check)
+            match api.get_account().await {
+                Ok(info) => {
+                    let _ = tx.send(AppMessage::AccountLoaded(info));
+                }
+                Err(_) => {
+                    let _ = tx.send(AppMessage::ApiStatus(false));
+                }
+            }
+
+            // 2. Backup list
+            match api.list_backups(1, 50).await {
+                Ok(backups) => {
+                    let _ = tx.send(AppMessage::BackupsLoaded(backups));
+                }
+                Err(_) => {
+                    // Silent — dashboard will show empty list
+                }
+            }
+        });
+    }
+
+    /// Refresh just the backup list (e.g. after a backup completes).
     fn refresh_backups(&self) {
         let tx = self.tx.clone();
         let config = self.config.clone();
@@ -607,54 +640,8 @@ impl App {
                 &config.api_url,
                 &version,
             );
-            match api.list_backups(1, 50).await {
-                Ok(backups) => {
-                    let _ = tx.send(AppMessage::BackupsLoaded(backups));
-                }
-                Err(e) => {
-                    let _ = tx.send(AppMessage::Error(format!("Failed to load backups: {}", e)));
-                }
-            }
-        });
-    }
-
-    /// Check API health in the background.
-    fn check_health(&self) {
-        let tx = self.tx.clone();
-        let config = self.config.clone();
-        let version = self.version.clone();
-
-        tokio::spawn(async move {
-            let api = crate::core::api::ApiClient::new(
-                &config.api_key,
-                &config.api_url,
-                &version,
-            );
-            let connected = api.health_check().await;
-            let _ = tx.send(AppMessage::ApiStatus(connected));
-        });
-    }
-
-    /// Load account info in the background.
-    fn load_account(&self) {
-        let tx = self.tx.clone();
-        let config = self.config.clone();
-        let version = self.version.clone();
-
-        tokio::spawn(async move {
-            let api = crate::core::api::ApiClient::new(
-                &config.api_key,
-                &config.api_url,
-                &version,
-            );
-            match api.get_account().await {
-                Ok(info) => {
-                    let _ = tx.send(AppMessage::AccountLoaded(info));
-                }
-                Err(_) => {
-                    // Transient API error — don't show to user, just mark disconnected
-                    let _ = tx.send(AppMessage::ApiStatus(false));
-                }
+            if let Ok(backups) = api.list_backups(1, 50).await {
+                let _ = tx.send(AppMessage::BackupsLoaded(backups));
             }
         });
     }
