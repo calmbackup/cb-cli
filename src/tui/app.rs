@@ -129,18 +129,23 @@ impl ProgressState {
 
     /// Called every frame — advances delayed steps when their min time is up.
     pub fn tick(&mut self) {
-        if self.completed {
-            // Finalize the last step if still active
-            self.finalize_current();
-            return;
-        }
-
         if self.pending_advances > 0 {
-            let min_ms = self.min_duration_for_current();
+            // When backup is already complete, fast-forward through remaining
+            // steps so the UI catches up before showing the completion banner.
+            let min_ms = if self.completed {
+                0
+            } else {
+                self.min_duration_for_current()
+            };
             let elapsed = self.step_visible_since.map(|t| t.elapsed()).unwrap_or_default();
             if elapsed >= Duration::from_millis(min_ms) {
                 self.do_advance();
             }
+            return;
+        }
+
+        if self.completed {
+            self.finalize_current();
         }
     }
 
