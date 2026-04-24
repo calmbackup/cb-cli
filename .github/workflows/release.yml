@@ -78,3 +78,17 @@ jobs:
         with:
           files: "*.tar.gz"
           generate_release_notes: true
+
+      - name: Notify LogBlazer
+        continue-on-error: true
+        env:
+          LOGBLAZER_KEY: ${{ secrets.LOGBLAZER_KEY }}
+        run: |
+          [ -z "$LOGBLAZER_KEY" ] && exit 0
+          curl -s -X POST "https://app.logblazer.com/api/logs/${LOGBLAZER_KEY}" \
+            -d "payload=CLI ${{ github.ref_name }} published" \
+            -d "status=SUCCESS" \
+            -d "source=github-release" \
+            -d "monitor_title=Latest CLI Version" \
+            -d "monitor_type=text" \
+            -d "monitor_value=${{ github.ref_name }}"
