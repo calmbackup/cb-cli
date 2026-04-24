@@ -24,21 +24,21 @@ impl DatabaseDumper for SqliteDumper {
 
         let output_str = output_path.to_string_lossy();
 
-        // Try sqlite3 .backup command first
-        let result = Command::new("sqlite3")
+        let sqlite3_ok = Command::new("sqlite3")
             .arg(&self.db_path)
-            .arg(format!(".backup '{}'", output_str))
-            .output();
+            .arg(format!(".backup {}", output_str))
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .is_some()
+            && output_path.metadata().map(|m| m.len() > 0).unwrap_or(false);
 
-        match result {
-            Ok(output) if output.status.success() => Ok(()),
-            _ => {
-                // Fallback to direct file copy
-                std::fs::copy(&self.db_path, output_path)
-                    .map_err(|e| AppError::Dump(format!("failed to copy SQLite database: {}", e)))?;
-                Ok(())
-            }
+        if !sqlite3_ok {
+            std::fs::copy(&self.db_path, output_path)
+                .map_err(|e| AppError::Dump(format!("failed to copy SQLite database: {}", e)))?;
         }
+
+        Ok(())
     }
 
     fn verify(&self, dump_path: &Path) -> Result<bool> {
