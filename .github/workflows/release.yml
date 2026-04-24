@@ -92,3 +92,4 @@ jobs:
             -d "monitor_title=Latest CLI Version" \
             -d "monitor_type=text" \
             -d "monitor_value=${{ github.ref_name }}"
+
