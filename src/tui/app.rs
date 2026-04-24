@@ -306,10 +306,14 @@ impl App {
         loop {
             terminal.draw(|frame| self.draw(frame))?;
 
-            // Check for crossterm events with a small timeout (50ms)
+            // Check for crossterm events with a small timeout (50ms).
+            // Must match all event variants — unmatched events still consume
+            // the poll slot, so ignoring them with `if let` causes a spin loop
+            // when non-Key events (Resize, FocusLost, etc.) flood in.
             if crossterm::event::poll(Duration::from_millis(50))? {
-                if let Event::Key(key) = crossterm::event::read()? {
-                    self.handle_key(key);
+                match crossterm::event::read()? {
+                    Event::Key(key) => self.handle_key(key),
+                    _ => {}
                 }
             }
 

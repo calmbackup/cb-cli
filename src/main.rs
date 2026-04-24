@@ -74,6 +74,11 @@ async fn main() -> anyhow::Result<()> {
             };
             let config = core::config::Config::load(&config_path)?;
             let key = core::crypto::derive_key(&config.encryption_key);
+            use std::io::IsTerminal;
+            if !std::io::stdin().is_terminal() {
+                anyhow::bail!("TUI requires an interactive terminal. Use `calmbackup run` for non-interactive mode.");
+            }
+
             let app = tui::app::App::new(config, key, VERSION.to_string());
 
             let mut terminal = ratatui::init();
