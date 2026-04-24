@@ -83,6 +83,7 @@ impl ApiClient {
             "size": size,
             "checksum": checksum,
             "db_driver": db_driver,
+            "package_version": self.version,
         });
 
         let response = self
