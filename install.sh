@@ -242,7 +242,7 @@ if [ "${MODE}" = "system" ]; then
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
 
-0 2 * * * root calmbackup run --quiet 2>&1 | logger -t calmbackup
+0 2 * * * root flock -n /etc/calmbackup/calmbackup.yaml.lock calmbackup run --quiet 2>&1 | logger -t calmbackup
 CRON
         chmod 644 "${CRON_FILE}"
         info "Cron installed: daily at 2:00 AM (edit ${CRON_FILE} to change)"
@@ -251,7 +251,7 @@ CRON
     fi
 else
     # User-level cron via crontab
-    CRON_LINE="0 2 * * * ${INSTALL_DIR}/calmbackup run --quiet 2>&1 | logger -t calmbackup"
+    CRON_LINE="0 2 * * * flock -n ${CONFIG_FILE}.lock ${INSTALL_DIR}/calmbackup run --quiet 2>&1 | logger -t calmbackup"
     if crontab -l 2>/dev/null | grep -qF "calmbackup run"; then
         warn "Cron job already exists in user crontab, skipping."
     else

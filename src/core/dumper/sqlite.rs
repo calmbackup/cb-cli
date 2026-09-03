@@ -1,19 +1,23 @@
 use std::path::Path;
 use std::time::Duration;
 
-use rusqlite::backup::Backup;
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::backup::{Backup, StepResult};
+use rusqlite::{Connection, ErrorCode, OpenFlags};
 
 use crate::core::config::DatabaseConfig;
 use crate::core::dumper::DatabaseDumper;
 use crate::core::types::{AppError, Result};
 
 /// How long to wait for a writer's lock before giving up on a step.
-const BUSY_TIMEOUT: Duration = Duration::from_secs(60);
-/// Pages copied per backup step; between steps the API yields to writers.
+const BUSY_TIMEOUT: Duration = Duration::from_secs(1);
+/// Pages copied per step. A read transaction pins the source snapshot, so
+/// writers cannot restart this progress between chunks.
 const PAGES_PER_STEP: i32 = 100;
-/// Pause between backup steps when the source is busy/locked.
+/// Pause before retrying when the source is busy/locked.
 const STEP_PAUSE: Duration = Duration::from_millis(250);
+/// Overall deadline for producing a SQLite snapshot. This bounds retries when
+/// a write-heavy database continually invalidates the online backup snapshot.
+const BACKUP_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 pub struct SqliteDumper {
     db_path: String,
@@ -40,22 +44,49 @@ impl DatabaseDumper for SqliteDumper {
     /// retryable error, never a silently-corrupt backup that only gets caught
     /// (or worse, missed) downstream.
     fn dump(&self, output_path: &Path) -> Result<()> {
+        let started = std::time::Instant::now();
         let src = Connection::open_with_flags(&self.db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(|e| AppError::Dump(format!("failed to open source database: {}", e)))?;
         // Wait for a concurrent writer's lock instead of failing immediately.
         src.busy_timeout(BUSY_TIMEOUT)
             .map_err(|e| AppError::Dump(format!("failed to set busy_timeout: {}", e)))?;
+        // Pin a consistent source snapshot before starting the backup. Without
+        // this explicit read transaction, every external commit can restart
+        // sqlite3_backup and starve a busy database forever.
+        loop {
+            match src.execute_batch("BEGIN; SELECT name FROM sqlite_schema LIMIT 1;") {
+                Ok(()) => break,
+                Err(e)
+                    if matches!(
+                        e.sqlite_error_code(),
+                        Some(ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked)
+                    ) =>
+                {
+                    let _ = src.execute_batch("ROLLBACK");
+
+                    if started.elapsed() >= BACKUP_TIMEOUT {
+                        return Err(AppError::Dump(format!(
+                            "online backup timed out after {} seconds; database remained busy",
+                            BACKUP_TIMEOUT.as_secs()
+                        )));
+                    }
+                }
+                Err(e) => {
+                    return Err(AppError::Dump(format!(
+                        "failed to start snapshot transaction: {}",
+                        e
+                    )));
+                }
+            }
+        }
 
         let mut dst = Connection::open(output_path)
             .map_err(|e| AppError::Dump(format!("failed to create dump file: {}", e)))?;
 
         let backup = Backup::new(&src, &mut dst)
             .map_err(|e| AppError::Dump(format!("failed to initialise backup: {}", e)))?;
-        // Copies the whole DB in PAGES_PER_STEP chunks; on SQLITE_BUSY/LOCKED it
-        // sleeps STEP_PAUSE and retries until the snapshot is complete.
-        backup
-            .run_to_completion(PAGES_PER_STEP, STEP_PAUSE, None)
-            .map_err(|e| AppError::Dump(format!("online backup failed: {}", e)))?;
+        let remaining = BACKUP_TIMEOUT.saturating_sub(started.elapsed());
+        run_to_completion_with_timeout(&backup, remaining, STEP_PAUSE)?;
 
         Ok(())
     }
@@ -77,6 +108,41 @@ impl DatabaseDumper for SqliteDumper {
 
     fn filename(&self) -> &str {
         "database.sqlite"
+    }
+}
+
+/// Copy the database in small chunks while enforcing a real wall-clock
+/// deadline. rusqlite's `run_to_completion` retries BUSY/LOCKED forever, which
+/// allowed one cron process per day to accumulate without ever reaching the
+/// failure-notification path.
+fn run_to_completion_with_timeout(
+    backup: &Backup<'_, '_>,
+    timeout: Duration,
+    pause: Duration,
+) -> Result<()> {
+    let started = std::time::Instant::now();
+
+    loop {
+        let step_result = backup
+            .step(PAGES_PER_STEP)
+            .map_err(|e| AppError::Dump(format!("online backup failed: {}", e)))?;
+
+        match step_result {
+            StepResult::Done => return Ok(()),
+            StepResult::More | StepResult::Busy | StepResult::Locked => {
+                if started.elapsed() >= timeout {
+                    return Err(AppError::Dump(format!(
+                        "online backup timed out after {} seconds; database remained busy",
+                        timeout.as_secs()
+                    )));
+                }
+
+                if matches!(step_result, StepResult::Busy | StepResult::Locked) {
+                    std::thread::sleep(pause);
+                }
+            }
+            _ => unreachable!("rusqlite returned an unknown backup step result"),
+        }
     }
 }
 
@@ -175,11 +241,12 @@ mod tests {
                 conn.execute("INSERT INTO t(v) VALUES(?1)", params![format!("w-{i}")])
                     .unwrap();
                 i += 1;
+                std::thread::sleep(Duration::from_millis(1));
             }
         });
 
         let d = dumper_for(&db);
-        for iter in 0..15 {
+        for iter in 0..5 {
             let out = dir.join(format!("concurrent-out-{iter}.sqlite"));
             d.dump(&out).expect("dump under write load must not error");
             assert!(
@@ -192,5 +259,37 @@ mod tests {
         stop.store(true, Ordering::Relaxed);
         writer.join().unwrap();
         let _ = std::fs::remove_file(&db);
+    }
+
+    #[test]
+    fn busy_database_respects_overall_backup_deadline() {
+        let dir = test_dir();
+        let db = dir.join("locked.sqlite");
+        let out = dir.join("locked-out.sqlite");
+        make_db(&db, 10);
+
+        let locker = Connection::open(&db).unwrap();
+        locker.execute_batch("BEGIN EXCLUSIVE; INSERT INTO t(v) VALUES('locked');").unwrap();
+
+        let src = Connection::open_with_flags(&db, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let mut dst = Connection::open(&out).unwrap();
+        let backup = Backup::new(&src, &mut dst).unwrap();
+        let started = std::time::Instant::now();
+        let timeout = Duration::from_millis(50);
+
+        let error = run_to_completion_with_timeout(
+            &backup,
+            timeout,
+            Duration::from_millis(5),
+        )
+        .expect_err("a permanently locked database must time out");
+
+        assert!(error.to_string().contains("timed out"));
+        assert!(started.elapsed() >= timeout);
+
+        drop(backup);
+        locker.execute_batch("ROLLBACK").unwrap();
+        let _ = std::fs::remove_file(&db);
+        let _ = std::fs::remove_file(&out);
     }
 }

@@ -39,9 +39,12 @@ pub async fn execute(config_path: Option<&str>, mode: OutputMode) -> Result<()> 
     let result = match service.backup(progress).await {
         Ok(r) => r,
         Err(e) => {
-            // Try to send failure notification (non-fatal)
+            // Try to send failure notification (non-fatal). If delivery also
+            // fails, surface that fact even in quiet/cron mode.
             let notify_api = ApiClient::new(&config.api_key, &config.api_url, VERSION);
-            let _ = notify_api.notify("backup-failed", &e.to_string()).await;
+            if let Err(notify_error) = notify_api.notify("backup-failed", &e.to_string()).await {
+                eprintln!("Warning: failed to send backup failure notification: {notify_error}");
+            }
             return Err(e);
         }
     };
