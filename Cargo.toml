@@ -1,6 +1,6 @@
 [package]
 name = "calmbackup"
-version = "2.0.9"
+version = "2.0.10"
 edition = "2024"
 description = "Zero-knowledge encrypted database backups"
 license = "MIT"
