@@ -73,10 +73,15 @@ jobs:
         with:
           merge-multiple: true
 
+      - name: Generate checksums
+        run: sha256sum *.tar.gz > SHA256SUMS
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: "*.tar.gz"
+          files: |
+            *.tar.gz
+            SHA256SUMS
           generate_release_notes: true
 
       - name: Notify LogBlazer
@@ -92,4 +97,3 @@ jobs:
             -d "monitor_title=Latest CLI Version" \
             -d "monitor_type=text" \
             -d "monitor_value=${{ github.ref_name }}"
-

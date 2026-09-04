@@ -116,6 +116,18 @@ Default schedule: daily at 2:00 AM. Logs go to syslog:
 journalctl -t calmbackup
 ```
 
+## Automatic updates
+
+Every `calmbackup run` checks for a newer stable release before opening the
+database. When one is available, the CLI verifies the release archive against
+the published SHA-256 manifest, installs it atomically under a global update
+lock, and restarts the pending backup with the new binary. The previous binary
+is retained beside the installation as `calmbackup.previous` for rollback.
+
+An unavailable update service or an installation-permission error does not
+prevent the scheduled backup from running. Update checks time out quickly, and
+installation errors are written to stderr/syslog.
+
 ## How it works
 
 1. **Dump** — Runs `mysqldump`, `pg_dump`, or `sqlite3 .backup` depending on your driver
