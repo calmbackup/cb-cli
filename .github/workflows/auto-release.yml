@@ -29,6 +29,7 @@ jobs:
         run: |
           TEST_BINARY=$(cargo test --locked --no-run --message-format=json | jq -r 'select(.reason == "compiler-artifact" and .profile.test == true and .target.name == "calmbackup") | .executable')
           test -x "$TEST_BINARY"
+          echo "::notice::$(rustc --version)"
           # /tmp may be tmpfs: payload files there count against the RAM cap.
           # Require actual disk-backed scratch, as documented for large backups.
           echo "::notice::Default temporary filesystem: $(stat -f -c %T "${TMPDIR:-/tmp}")"
@@ -47,6 +48,11 @@ jobs:
           if [ "$RESULT" -ne 0 ]; then
             DETAIL=$(docker inspect calmbackup-memory-ci --format 'OOMKilled={{.State.OOMKilled}} ExitCode={{.State.ExitCode}}')
             echo "::error::Streaming test failed: $DETAIL; scratch filesystem=$SCRATCH_FS"
+            # Make bounded synthetic-only diagnostics visible in check annotations
+            # as well as the full job log (which requires GitHub authentication).
+            docker logs calmbackup-memory-ci 2>&1 | tail -n 45 | while IFS= read -r LINE; do
+              echo "::notice::$LINE"
+            done
           fi
           docker rm calmbackup-memory-ci
           exit "$RESULT"

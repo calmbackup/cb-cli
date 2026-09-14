@@ -6,6 +6,34 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 
+fn memory_snapshot(stage: &str) {
+    println!("Memory snapshot: {stage}");
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+        for line in status
+            .lines()
+            .filter(|line| line.starts_with("VmRSS:") || line.starts_with("VmHWM:"))
+        {
+            println!("{line}");
+        }
+    }
+    if let Ok(stats) = std::fs::read_to_string("/sys/fs/cgroup/memory.stat") {
+        for line in stats.lines().filter(|line| {
+            [
+                "anon ",
+                "file ",
+                "file_dirty ",
+                "file_writeback ",
+                "shmem ",
+                "kernel ",
+            ]
+            .iter()
+            .any(|key| line.starts_with(key))
+        }) {
+            println!("cgroup {line}");
+        }
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "multi-GiB disk/network test; see MEMORY-EFFICIENT-BACKUPS.md"]
 async fn large_file_pipeline_under_memory_limit() {
@@ -33,20 +61,31 @@ async fn large_file_pipeline_under_memory_limit() {
     }
     let mut remaining = bytes;
     println!("Generating {bytes} bytes of synthetic data (no production access)");
+    memory_snapshot("before fixture generation");
+    let mut next_snapshot = 64 * 1024 * 1024;
     while remaining > 0 {
         buffer[..8].copy_from_slice(&remaining.to_le_bytes());
         let n = remaining.min(buffer.len() as u64) as usize;
         file.write_all(&buffer[..n]).unwrap();
         remaining -= n as u64;
+        if bytes - remaining >= next_snapshot {
+            memory_snapshot(&format!(
+                "generated {} MiB",
+                (bytes - remaining) / 1024 / 1024
+            ));
+            next_snapshot += 64 * 1024 * 1024;
+        }
     }
     file.sync_all().unwrap();
     drop(file);
     let key = crypto::derive_key("synthetic-memory-test-key-not-for-backups");
     println!("Encrypting complete file");
+    memory_snapshot("before encryption");
     crypto::encrypt(&input, &encrypted, &key).unwrap();
     let encrypted_bytes = std::fs::metadata(&encrypted).unwrap().len();
     assert_eq!(encrypted_bytes, bytes + 30);
     println!("Checksumming and authenticating encrypted file");
+    memory_snapshot("before checksum and authentication");
     let checksum = crypto::checksum(&encrypted).unwrap();
     assert!(crypto::verify_key(&encrypted, &key).unwrap());
 
@@ -106,12 +145,15 @@ async fn large_file_pipeline_under_memory_limit() {
         uploaded_hash
     });
     println!("Uploading over loopback HTTP");
+    memory_snapshot("before upload");
     upload::upload(&encrypted, &url).await.unwrap();
     println!("Downloading over loopback HTTP");
+    memory_snapshot("before download");
     upload::download(&url, &downloaded).await.unwrap();
     assert_eq!(server.join().unwrap(), checksum);
     assert_eq!(crypto::checksum(&downloaded).unwrap(), checksum);
     println!("Decrypting and comparing every plaintext byte");
+    memory_snapshot("before decryption");
     crypto::decrypt(&downloaded, &restored, &key).unwrap();
     assert_eq!(std::fs::metadata(&restored).unwrap().len(), bytes);
     let mut original = File::open(&input).unwrap();
