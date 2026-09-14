@@ -149,10 +149,35 @@ The dedicated tag-release workflow's previously inactive test condition is fixed
 - Static Linux amd64 musl release build passed and the executable ran without
   system OpenSSL. Clippy completed with existing style/dead-code warnings; modified
   Rust files passed formatting checks, and both workflow YAML files parsed.
-- The first CI memory gate exited 137 before release. An explicit local tmpfs
-  reproduction also exited 137 during fixture generation under the same cap;
-  the 16-GiB disk-backed test passed. CI now requires disk-backed scratch and
-  reports its filesystem and OOM status. The 256-MiB limit was not raised.
+- Four initial CI runs exited 137 with the memory gate preventing release.
+  Diagnostics confirmed an OOM kill on disk-backed storage (`ext2/ext3`), not
+  tmpfs. The last failing stage log reached encryption after fixture generation;
+  its preceding process RSS was about 9 MiB and filesystem cache occupied most
+  of the container budget. The precise cause of the failure inside encryption
+  was **not conclusively isolated**. A later run with a periodic memory observer
+  passed the same 256-MiB/no-swap ceiling. The observer is test-only; it is not a
+  production memory fix. Do not infer that 256 MiB is a universally sufficient
+  production container limit from a passing run or the process RSS measurement.
+- An explicit local tmpfs reproduction also exited 137 during fixture generation,
+  whereas repeated disk-backed 1-GiB runs and the full 16-GiB test passed locally
+  without the periodic observer. CI requires disk-backed scratch and retains
+  bounded stage/cgroup failure diagnostics. No memory ceiling was raised and no
+  failed release gate was bypassed. Budget filesystem cache and runtime headroom
+  for the actual production host and validate the complete application backup.
+- CI run [34867954377](https://github.com/calmbackup/cb-cli/actions/runs/34867954377)
+  passed the regular suite and the separate memory gate before creating the
+  `v2.0.11` tag. Both musl builds and publication also completed successfully.
+- [v2.0.11](https://github.com/calmbackup/cb-cli/releases/tag/v2.0.11) was published
+  at 16:29:59 UTC on 14 September 2026. Both downloaded tarballs matched
+  SHA256SUMS and GitHub's asset digests. The actual released amd64 executable
+  reported `calmbackup 2.0.11` and passed real CLI `run`/`restore` integration in
+  all three directions: new-to-new, new-to-v2.0.10 and v2.0.10-to-new. These tests
+  used SQLite BLOB/NULL data and a loopback mock service with external networking
+  disabled. The source remained unchanged. The arm64 artifact's checksum and
+  architecture were verified; it was not executed on this x86-64 workstation.
+- The tagged source's 72 regular tests passed again locally. Its separate 1-GiB
+  memory test also passed without the periodic observer under 256 MiB/no swap:
+  79.10 seconds, 16,016 KiB process peak RSS. This does not erase the CI caveat.
 
 ### Publishing
 
