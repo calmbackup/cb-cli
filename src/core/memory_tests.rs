@@ -37,6 +37,22 @@ fn memory_snapshot(stage: &str) {
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "multi-GiB disk/network test; see MEMORY-EFFICIENT-BACKUPS.md"]
 async fn large_file_pipeline_under_memory_limit() {
+    // Optional low-frequency observer for failures inside an individual stage.
+    // It reads small proc/cgroup metadata only, never payload contents.
+    let (finish, observer) = if std::env::var_os("CB_MEMORY_DIAGNOSTICS").is_some() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            while matches!(
+                rx.recv_timeout(std::time::Duration::from_millis(100)),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            ) {
+                memory_snapshot("periodic observer");
+            }
+        });
+        (Some(tx), Some(thread))
+    } else {
+        (None, None)
+    };
     let gib: u64 = std::env::var("CB_MEMORY_TEST_GIB")
         .unwrap_or("2".into())
         .parse()
@@ -179,5 +195,11 @@ async fn large_file_pipeline_under_memory_limit() {
     println!(
         "PASS: {bytes} plaintext bytes; {encrypted_bytes} encrypted bytes; full HTTP/checksum/authentication/byte equality"
     );
+    if let Some(tx) = finish {
+        tx.send(()).unwrap();
+    }
+    if let Some(thread) = observer {
+        thread.join().unwrap();
+    }
     // TempDir cleans only this test's exclusively generated files.
 }

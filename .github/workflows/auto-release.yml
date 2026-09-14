@@ -40,7 +40,7 @@ jobs:
           set +e
           docker run --name calmbackup-memory-ci --network=none --memory=256m --memory-swap=256m \
             -v "$TEST_BINARY:/test:ro" -v "$SCRATCH:/scratch" \
-            -e CB_MEMORY_TEST_GIB=1 -e CB_MEMORY_TEST_DIR=/scratch \
+            -e CB_MEMORY_TEST_GIB=1 -e CB_MEMORY_TEST_DIR=/scratch -e CB_MEMORY_DIAGNOSTICS=1 \
             ubuntu:24.04 /test core::memory_tests::large_file_pipeline_under_memory_limit \
             --exact --ignored --nocapture
           RESULT=$?
