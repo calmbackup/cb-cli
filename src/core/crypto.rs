@@ -1,10 +1,12 @@
-use std::path::Path;
+use crate::core::staging;
 use crate::core::types::{AppError, Result};
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::Path;
 
-use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
-use aes_gcm::aead::Aead;
-use sha2::{Sha256, Digest};
+use openssl::symm::{Cipher, Crypter, Mode};
 use rand::RngCore;
+use sha2::{Digest, Sha256};
 
 /// File format (Go-compatible):
 /// [VERSION: 2 bytes (0x01, 0x00)]
@@ -15,6 +17,9 @@ const VERSION: [u8; 2] = [0x01, 0x00];
 const IV_SIZE: usize = 12;
 const TAG_SIZE: usize = 16;
 const HEADER_SIZE: usize = 2 + IV_SIZE + TAG_SIZE; // 30 bytes
+const BUFFER_SIZE: usize = 64 * 1024;
+// NIST SP 800-38D: at most 2^39 - 256 plaintext bits per GCM invocation.
+const MAX_PLAINTEXT: u64 = (1u64 << 36) - 32;
 
 /// Derive a 32-byte AES-256 key from the config encryption key string.
 /// Uses SHA-256, matching the Go implementation.
@@ -30,100 +35,114 @@ pub fn derive_key(key_string: &str) -> [u8; 32] {
 /// Encrypt a file using AES-256-GCM.
 /// Writes Go-compatible format: VERSION + IV + TAG + CIPHERTEXT.
 pub fn encrypt(input_path: &Path, output_path: &Path, key: &[u8; 32]) -> Result<()> {
-    let plaintext = std::fs::read(input_path).map_err(|e| {
-        AppError::Crypto(format!("Failed to read input file: {}", e))
-    })?;
-
-    // Generate random 12-byte IV
+    let mut input = File::open(input_path)?;
+    check_size(input.metadata()?.len())?;
     let mut iv = [0u8; IV_SIZE];
-    rand::thread_rng().fill_bytes(&mut iv);
-    let nonce = Nonce::from_slice(&iv);
-
-    // Encrypt with AES-256-GCM
-    let cipher = Aes256Gcm::new_from_slice(key)
-        .map_err(|e| AppError::Crypto(format!("Failed to create cipher: {}", e)))?;
-
-    // aes-gcm crate returns ciphertext || tag (tag is last 16 bytes)
-    let encrypted = cipher.encrypt(nonce, plaintext.as_ref())
-        .map_err(|e| AppError::Crypto(format!("Encryption failed: {}", e)))?;
-
-    // Split into ciphertext and tag for Go-compatible format
-    let ct_len = encrypted.len() - TAG_SIZE;
-    let ciphertext = &encrypted[..ct_len];
-    let tag = &encrypted[ct_len..];
-
-    // Write: VERSION + IV + TAG + CIPHERTEXT
-    let mut output = Vec::with_capacity(HEADER_SIZE + ciphertext.len());
-    output.extend_from_slice(&VERSION);
-    output.extend_from_slice(&iv);
-    output.extend_from_slice(tag);
-    output.extend_from_slice(ciphertext);
-
-    std::fs::write(output_path, &output).map_err(|e| {
-        AppError::Crypto(format!("Failed to write encrypted file: {}", e))
-    })?;
-
-    Ok(())
+    rand::rngs::OsRng
+        .try_fill_bytes(&mut iv)
+        .map_err(|_| AppError::Crypto("Failed to generate archive nonce".into()))?;
+    let mut cipher = Crypter::new(Cipher::aes_256_gcm(), Mode::Encrypt, key, Some(&iv))
+        .map_err(|e| AppError::Crypto(format!("Failed to create cipher: {e}")))?;
+    let mut output = staging::file(output_path)?;
+    output.write_all(&VERSION)?;
+    output.write_all(&iv)?;
+    output.write_all(&[0; TAG_SIZE])?;
+    transform(&mut input, &mut output, &mut cipher, "Encryption failed")?;
+    let mut tag = [0; TAG_SIZE];
+    cipher
+        .get_tag(&mut tag)
+        .map_err(|e| AppError::Crypto(format!("Failed to get authentication tag: {e}")))?;
+    output.seek(SeekFrom::Start((2 + IV_SIZE) as u64))?;
+    output.write_all(&tag)?;
+    staging::publish(output, output_path)
 }
 
 /// Decrypt a file encrypted with AES-256-GCM.
 /// Reads Go-compatible format: VERSION + IV + TAG + CIPHERTEXT.
 pub fn decrypt(input_path: &Path, output_path: &Path, key: &[u8; 32]) -> Result<()> {
-    let data = std::fs::read(input_path).map_err(|e| {
-        AppError::Crypto(format!("Failed to read encrypted file: {}", e))
-    })?;
+    let mut input = File::open(input_path)?;
+    let mut output = staging::file(output_path)?;
+    // EVP emits unverified plaintext during update. Keep it exclusively in a
+    // 0600 staging file until finalize has authenticated the ENTIRE archive.
+    // No extraction/database restore may consume this file before publication.
+    decrypt_to(&mut input, &mut output, key)?;
+    staging::publish(output, output_path)
+}
 
-    let plaintext = decrypt_bytes(&data, key)?;
+fn decrypt_to(input: &mut File, output: &mut impl Write, key: &[u8; 32]) -> Result<()> {
+    let size = input.metadata()?.len();
+    if size < HEADER_SIZE as u64 {
+        return Err(AppError::Crypto(
+            "File too small to be a valid encrypted file".to_string(),
+        ));
+    }
+    check_size(size - HEADER_SIZE as u64)?;
+    let mut header = [0; HEADER_SIZE];
+    input.read_exact(&mut header)?;
+    if header[..2] != VERSION {
+        return Err(AppError::Crypto(format!(
+            "Unsupported file version: {:02x}{:02x}",
+            header[0], header[1]
+        )));
+    }
+    let mut cipher = Crypter::new(
+        Cipher::aes_256_gcm(),
+        Mode::Decrypt,
+        key,
+        Some(&header[2..14]),
+    )
+    .map_err(|e| AppError::Crypto(format!("Failed to create cipher: {e}")))?;
+    cipher
+        .set_tag(&header[14..])
+        .map_err(|e| AppError::Crypto(format!("Failed to set authentication tag: {e}")))?;
+    transform(input, output, &mut cipher, "Decryption failed")
+}
 
-    std::fs::write(output_path, &plaintext).map_err(|e| {
-        AppError::Crypto(format!("Failed to write decrypted file: {}", e))
-    })?;
-
+fn check_size(size: u64) -> Result<()> {
+    if size > MAX_PLAINTEXT {
+        return Err(AppError::Crypto(
+            "Archive exceeds the AES-GCM per-message limit (64 GiB minus 32 bytes)".into(),
+        ));
+    }
     Ok(())
 }
 
-/// Internal: decrypt raw bytes in Go-compatible format.
-fn decrypt_bytes(data: &[u8], key: &[u8; 32]) -> Result<Vec<u8>> {
-    if data.len() < HEADER_SIZE {
-        return Err(AppError::Crypto("File too small to be a valid encrypted file".to_string()));
+fn transform(
+    input: &mut impl Read,
+    output: &mut impl Write,
+    cipher: &mut Crypter,
+    error: &str,
+) -> Result<()> {
+    let mut buffer = [0; BUFFER_SIZE];
+    let mut transformed = vec![0; BUFFER_SIZE + Cipher::aes_256_gcm().block_size()];
+    let mut total = 0u64;
+    loop {
+        let read = match input.read(&mut buffer) {
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            result => result?,
+        };
+        if read == 0 {
+            break;
+        }
+        total = total
+            .checked_add(read as u64)
+            .ok_or_else(|| AppError::Crypto("Archive size overflow".into()))?;
+        check_size(total)?;
+        let written = cipher
+            .update(&buffer[..read], &mut transformed)
+            .map_err(|_| AppError::Crypto(error.into()))?;
+        output.write_all(&transformed[..written])?;
     }
-
-    // Verify version bytes
-    if data[0] != VERSION[0] || data[1] != VERSION[1] {
-        return Err(AppError::Crypto(format!(
-            "Unsupported file version: {:02x}{:02x}",
-            data[0], data[1]
-        )));
-    }
-
-    // Parse header
-    let iv = &data[2..2 + IV_SIZE];
-    let tag = &data[2 + IV_SIZE..2 + IV_SIZE + TAG_SIZE];
-    let ciphertext = &data[HEADER_SIZE..];
-
-    let nonce = Nonce::from_slice(iv);
-
-    // Reassemble into ciphertext || tag format expected by aes-gcm crate
-    let mut combined = Vec::with_capacity(ciphertext.len() + TAG_SIZE);
-    combined.extend_from_slice(ciphertext);
-    combined.extend_from_slice(tag);
-
-    let cipher = Aes256Gcm::new_from_slice(key)
-        .map_err(|e| AppError::Crypto(format!("Failed to create cipher: {}", e)))?;
-
-    let plaintext = cipher.decrypt(nonce, combined.as_ref())
-        .map_err(|e| AppError::Crypto(format!("Decryption failed: {}", e)))?;
-
-    Ok(plaintext)
+    let written = cipher
+        .finalize(&mut transformed)
+        .map_err(|_| AppError::Crypto(error.into()))?;
+    output.write_all(&transformed[..written])?;
+    Ok(())
 }
 
 /// Verify that a key can decrypt an encrypted file (test decryption without writing output).
 pub fn verify_key(encrypted_path: &Path, key: &[u8; 32]) -> Result<bool> {
-    let data = std::fs::read(encrypted_path).map_err(|e| {
-        AppError::Crypto(format!("Failed to read encrypted file: {}", e))
-    })?;
-
-    match decrypt_bytes(&data, key) {
+    match decrypt_to(&mut File::open(encrypted_path)?, &mut std::io::sink(), key) {
         Ok(_) => Ok(true),
         Err(AppError::Crypto(msg)) if msg.contains("Decryption failed") => Ok(false),
         Err(e) => Err(e),
@@ -132,9 +151,19 @@ pub fn verify_key(encrypted_path: &Path, key: &[u8; 32]) -> Result<bool> {
 
 /// Compute SHA-256 checksum of a file, returned as hex string.
 pub fn checksum(file_path: &Path) -> Result<String> {
-    let data = std::fs::read(file_path)?;
+    let mut input = File::open(file_path)?;
     let mut hasher = Sha256::new();
-    hasher.update(&data);
+    let mut buffer = [0; BUFFER_SIZE];
+    loop {
+        let read = match input.read(&mut buffer) {
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            result => result?,
+        };
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
     let result = hasher.finalize();
     Ok(hex::encode(result))
 }
@@ -142,6 +171,7 @@ pub fn checksum(file_path: &Path) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::Aead};
     use std::io::Write;
 
     /// Helper: create a temp file with the given contents, return its path.
@@ -351,7 +381,10 @@ mod tests {
         let result = decrypt(small.path(), out.path(), &key);
         assert!(result.is_err());
         let msg = format!("{}", result.unwrap_err());
-        assert!(msg.contains("too small"), "error should mention too small: {msg}");
+        assert!(
+            msg.contains("too small"),
+            "error should mention too small: {msg}"
+        );
     }
 
     #[test]
@@ -367,7 +400,10 @@ mod tests {
         let result = decrypt(bad.path(), out.path(), &key);
         assert!(result.is_err());
         let msg = format!("{}", result.unwrap_err());
-        assert!(msg.contains("version"), "error should mention version: {msg}");
+        assert!(
+            msg.contains("version"),
+            "error should mention version: {msg}"
+        );
     }
 
     #[test]
@@ -387,7 +423,10 @@ mod tests {
         std::fs::write(encrypted.path(), &data).unwrap();
 
         let result = decrypt(encrypted.path(), decrypted.path(), &key);
-        assert!(result.is_err(), "corrupted ciphertext should fail decryption");
+        assert!(
+            result.is_err(),
+            "corrupted ciphertext should fail decryption"
+        );
     }
 
     // ---------------------------------------------------------------
@@ -423,7 +462,10 @@ mod tests {
         let key = derive_key("k");
 
         let result = verify_key(bad.path(), &key);
-        assert!(result.is_err(), "malformed file should return Err, not Ok(false)");
+        assert!(
+            result.is_err(),
+            "malformed file should return Err, not Ok(false)"
+        );
     }
 
     // ---------------------------------------------------------------
@@ -465,8 +507,9 @@ mod tests {
         // 5. Call decrypt() and verify plaintext
 
         let key_bytes = derive_key("go-compat-key");
-        let iv: [u8; 12] = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
-                             0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C];
+        let iv: [u8; 12] = [
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C,
+        ];
         let plaintext = b"Go says hello to Rust";
 
         // Encrypt with AES-256-GCM directly
@@ -492,6 +535,128 @@ mod tests {
         decrypt(enc_file.path(), dec_file.path(), &key_bytes).unwrap();
 
         let result = std::fs::read(dec_file.path()).unwrap();
-        assert_eq!(result, plaintext, "decrypted output must match original plaintext");
+        assert_eq!(
+            result, plaintext,
+            "decrypted output must match original plaintext"
+        );
+    }
+
+    #[test]
+    fn legacy_compatibility_in_both_directions_at_chunk_boundaries() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("input");
+        let encrypted = dir.path().join("encrypted");
+        let output = dir.path().join("output");
+        let key = derive_key("compatibility-key");
+        let old_cipher = Aes256Gcm::new_from_slice(&key).unwrap();
+        for len in [
+            0,
+            1,
+            15,
+            16,
+            17,
+            BUFFER_SIZE - 1,
+            BUFFER_SIZE,
+            BUFFER_SIZE + 1,
+            3 * BUFFER_SIZE + 71,
+        ] {
+            let data: Vec<u8> = (0..len).map(|i| (i % 251) as u8).collect();
+            std::fs::write(&input, &data).unwrap();
+            encrypt(&input, &encrypted, &key).unwrap();
+            let encoded = std::fs::read(&encrypted).unwrap();
+            let mut old_payload = encoded[HEADER_SIZE..].to_vec();
+            old_payload.extend_from_slice(&encoded[14..HEADER_SIZE]);
+            assert_eq!(
+                old_cipher
+                    .decrypt(Nonce::from_slice(&encoded[2..14]), old_payload.as_slice())
+                    .unwrap(),
+                data
+            );
+
+            // A fixed nonce is only used with this test key to build fixtures.
+            let nonce = [42; IV_SIZE];
+            let old = old_cipher
+                .encrypt(Nonce::from_slice(&nonce), data.as_slice())
+                .unwrap();
+            let (ct, tag) = old.split_at(len);
+            let mut fixture = VERSION.to_vec();
+            fixture.extend_from_slice(&nonce);
+            fixture.extend_from_slice(tag);
+            fixture.extend_from_slice(ct);
+            std::fs::write(&encrypted, fixture).unwrap();
+            decrypt(&encrypted, &output, &key).unwrap();
+            assert_eq!(std::fs::read(&output).unwrap(), data);
+        }
+    }
+
+    #[test]
+    fn authentication_failures_never_publish_plaintext_or_damage_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("input");
+        let encrypted = dir.path().join("encrypted");
+        let output = dir.path().join("output");
+        let key = derive_key("authentication-test");
+        std::fs::write(&input, vec![73; 2 * BUFFER_SIZE + 3]).unwrap();
+        encrypt(&input, &encrypted, &key).unwrap();
+        let valid = std::fs::read(&encrypted).unwrap();
+        let mut cases = Vec::new();
+        for index in [0, 2, 14, HEADER_SIZE, valid.len() - 1] {
+            let mut bad = valid.clone();
+            bad[index] ^= 1;
+            cases.push(bad);
+        }
+        cases.push(valid[..valid.len() - 1].to_vec());
+        let mut appended = valid.clone();
+        appended.push(0);
+        cases.push(appended);
+        cases.push(valid[..HEADER_SIZE - 1].to_vec());
+        for bad in cases {
+            std::fs::write(&encrypted, bad).unwrap();
+            std::fs::write(&output, b"existing destination").unwrap();
+            assert!(decrypt(&encrypted, &output, &key).is_err());
+            assert_eq!(std::fs::read(&output).unwrap(), b"existing destination");
+            std::fs::remove_file(&output).unwrap();
+            assert!(decrypt(&encrypted, &output, &key).is_err());
+            assert!(!output.exists());
+            assert_eq!(
+                std::fs::read_dir(dir.path()).unwrap().count(),
+                2,
+                "staging file leaked"
+            );
+        }
+    }
+
+    #[test]
+    fn gcm_limit_is_enforced_before_processing_large_files() {
+        assert!(check_size(MAX_PLAINTEXT).is_ok());
+        assert!(check_size(MAX_PLAINTEXT + 1).is_err());
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("oversize");
+        let output = dir.path().join("output");
+        File::create(&input)
+            .unwrap()
+            .set_len(MAX_PLAINTEXT + 1)
+            .unwrap();
+        assert!(encrypt(&input, &output, &[0; 32]).is_err());
+        assert!(!output.exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn published_crypto_files_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("input");
+        let encrypted = dir.path().join("encrypted");
+        let output = dir.path().join("output");
+        std::fs::write(&input, b"private").unwrap();
+        encrypt(&input, &encrypted, &[1; 32]).unwrap();
+        decrypt(&encrypted, &output, &[1; 32]).unwrap();
+        for file in [encrypted, output] {
+            assert_eq!(
+                std::fs::metadata(file).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
     }
 }

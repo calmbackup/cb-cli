@@ -1,9 +1,9 @@
-use std::path::Path;
 use crate::core::api::ApiClient;
 use crate::core::config::Config;
 use crate::core::dumper::DatabaseDumper;
 use crate::core::types::{AppError, ProgressFn, RestoreResult, Result};
 use crate::core::{archive, crypto, upload};
+use std::path::Path;
 
 /// Orchestrates the full restore pipeline.
 pub struct RestoreService {
@@ -32,16 +32,13 @@ impl RestoreService {
         let start = std::time::Instant::now();
 
         // Create temp directory
-        let random_suffix: u32 = rand::random();
-        let temp_dir = std::env::temp_dir().join(format!("calmbackup-restore-{:05}", random_suffix));
-        std::fs::create_dir_all(&temp_dir)?;
+        let temp_dir = tempfile::Builder::new()
+            .prefix("calmbackup-restore-")
+            .tempdir()?;
 
         let result = self
-            .restore_inner(backup_id, prune_local, &on_progress, &temp_dir)
+            .restore_inner(backup_id, prune_local, &on_progress, temp_dir.path())
             .await;
-
-        // Clean up temp dir
-        let _ = std::fs::remove_dir_all(&temp_dir);
 
         let (bid, fname) = result?;
         Ok(RestoreResult {
@@ -86,6 +83,11 @@ impl RestoreService {
             on_progress("Downloading backup...", None);
             std::fs::create_dir_all(local_dir)?;
             upload::download(&download_url, &local_path).await?;
+            if !cloud_checksum.is_empty() && crypto::checksum(&local_path)? != cloud_checksum {
+                return Err(AppError::Restore(
+                    "Downloaded archive checksum mismatch; database not touched".into(),
+                ));
+            }
         } else {
             on_progress("Downloading backup...", Some("cached locally"));
         }

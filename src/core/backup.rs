@@ -1,9 +1,9 @@
-use std::path::Path;
 use crate::core::api::ApiClient;
 use crate::core::config::Config;
 use crate::core::dumper::DatabaseDumper;
 use crate::core::types::{AppError, BackupResult, ProgressFn, Result};
 use crate::core::{archive, crypto, prune, upload};
+use std::path::Path;
 
 /// Orchestrates the full backup pipeline.
 pub struct BackupService {
@@ -30,15 +30,11 @@ impl BackupService {
         let start = std::time::Instant::now();
 
         // Step 1: Create temp directory
-        let random_suffix: u32 = rand::random();
-        let temp_dir = std::env::temp_dir().join(format!("calmbackup-{:05}", random_suffix));
-        std::fs::create_dir_all(&temp_dir)?;
+        // Keep plaintext private regardless of the caller's umask.
+        let temp_dir = tempfile::Builder::new().prefix("calmbackup-").tempdir()?;
 
         // Ensure cleanup on all exit paths
-        let result = self.backup_inner(&temp_dir, &on_progress).await;
-
-        // Clean up temp dir
-        let _ = std::fs::remove_dir_all(&temp_dir);
+        let result = self.backup_inner(temp_dir.path(), &on_progress).await;
 
         let backup_result = result?;
         Ok(BackupResult {
@@ -96,7 +92,10 @@ impl BackupService {
         // Step 9: Upload to cloud
         on_progress("Uploading to cloud...", None);
         let size = std::fs::metadata(&local_path)?.len();
-        match self.upload_to_cloud(&local_path, &filename, size, &checksum).await {
+        match self
+            .upload_to_cloud(&local_path, &filename, size, &checksum)
+            .await
+        {
             Ok(()) => {}
             Err(AppError::BackupDeleted) => {
                 // Non-fatal: backup was deleted server-side during upload

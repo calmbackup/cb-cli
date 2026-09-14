@@ -146,7 +146,20 @@ make build       # Output: bin/calmbackup
 make test        # Run all tests
 ```
 
-Requires Go 1.24+.
+Requires Rust with edition 2024 support, a C compiler, Make and Perl. SQLite and
+OpenSSL are built from vendored sources; released Linux musl binaries do not need
+system OpenSSL. CI builds using the committed Cargo.lock.
+
+## Large backups and memory
+
+Database dump verification, AES-256-GCM encryption/decryption, SHA-256 checksums
+and HTTP transfers use bounded buffers instead of reading whole backups into RAM.
+The existing archive format and encryption keys remain compatible. Restore waits
+for full authentication before extracting any plaintext or touching a database.
+
+Temporary plaintext still needs private **disk space**; streaming does not mean
+there is no plaintext on disk. See [memory limits, compatibility and the repeatable
+acceptance test](MEMORY-EFFICIENT-BACKUPS.md).
 
 ## License
 

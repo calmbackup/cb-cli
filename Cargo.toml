@@ -21,7 +21,8 @@ crossterm = "0.28"
 tokio = { version = "1", features = ["full"] }
 
 # HTTP
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+tokio-util = { version = "0.7", features = ["io"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -33,7 +34,9 @@ serde_yaml = "0.9"
 rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 
 # Crypto
-aes-gcm = "0.10"
+# EVP provides incremental GCM without changing the existing archive format.
+# Vendored OpenSSL keeps the Linux musl releases self-contained.
+openssl = { version = "0.10", features = ["vendored"] }
 sha2 = "0.10"
 rand = "0.8"
 hex = "0.4"
@@ -53,6 +56,11 @@ thiserror = "2"
 dirs = "6"
 fs2 = "0.4"
 semver = "1"
+tempfile = "3"
+
+[dev-dependencies]
+# Independent oracle for compatibility with the previous Rust/Go archive format.
+aes-gcm = "0.10"
 
 [profile.release]
 opt-level = 3
