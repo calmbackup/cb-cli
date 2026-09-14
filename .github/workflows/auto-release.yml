@@ -50,9 +50,11 @@ jobs:
             echo "::error::Streaming test failed: $DETAIL; scratch filesystem=$SCRATCH_FS"
             # Make bounded synthetic-only diagnostics visible in check annotations
             # as well as the full job log (which requires GitHub authentication).
-            docker logs calmbackup-memory-ci 2>&1 | tail -n 45 | while IFS= read -r LINE; do
-              echo "::notice::$LINE"
-            done
+            LOG=$(docker logs calmbackup-memory-ci 2>&1 | tail -n 45)
+            LOG=${LOG//'%'/'%25'}
+            LOG=${LOG//$'\r'/'%0D'}
+            LOG=${LOG//$'\n'/'%0A'}
+            echo "::notice::$LOG"
           fi
           docker rm calmbackup-memory-ci
           exit "$RESULT"
