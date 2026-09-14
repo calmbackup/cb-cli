@@ -63,6 +63,10 @@ not invent one. See [NIST SP 800-38D, section 5.2.1](https://nvlpubs.nist.gov/ni
 - SQL dumps and compressed/decrypted archives still occupy plaintext disk space.
   Backup/restore workspaces are randomly named mode-0700 temporary directories;
   staging files are mode 0600, independent of a permissive caller umask.
+- Set `TMPDIR` to a private, **disk-backed** directory for large backups/restores.
+  A RAM-backed `/tmp`/tmpfs stores the payload in memory even though the CLI reads
+  and writes it in small buffers. Streaming cannot make tmpfs storage free of RAM
+  costs. The memory regression test explicitly requires disk-backed scratch.
 - Normal errors/cancellation clean up owned temporary paths. SIGKILL, a power
   failure or filesystem error can leave private files for operator inspection;
   deletion is not a secure wipe. Use protected storage and sufficient free space.
@@ -107,7 +111,8 @@ a container. Example for a binary built on Ubuntu 24.04 (requires `jq` and Docke
 ```bash
 TEST_BINARY=$(cargo test --locked --no-run --message-format=json | jq -r 'select(.reason == "compiler-artifact" and .profile.test == true and .target.name == "calmbackup") | .executable')
 test -x "$TEST_BINARY"
-SCRATCH=$(mktemp -d)
+SCRATCH=$(mktemp -d "$(pwd)/.calmbackup-memory-XXXXXX")
+case "$(stat -f -c %T "$SCRATCH")" in tmpfs|ramfs) echo 'Disk-backed scratch is required'; exit 1;; esac
 docker run --rm --network=none --memory=256m --memory-swap=256m \
   -v "$TEST_BINARY:/test:ro" -v "$SCRATCH:/scratch" \
   -e CB_MEMORY_TEST_GIB=1 -e CB_MEMORY_TEST_DIR=/scratch \
@@ -144,6 +149,10 @@ The dedicated tag-release workflow's previously inactive test condition is fixed
 - Static Linux amd64 musl release build passed and the executable ran without
   system OpenSSL. Clippy completed with existing style/dead-code warnings; modified
   Rust files passed formatting checks, and both workflow YAML files parsed.
+- The first CI memory gate exited 137 before release. An explicit local tmpfs
+  reproduction also exited 137 during fixture generation under the same cap;
+  the 16-GiB disk-backed test passed. CI now requires disk-backed scratch and
+  reports its filesystem and OOM status. The 256-MiB limit was not raised.
 
 ### Publishing
 

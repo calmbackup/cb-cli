@@ -29,12 +29,27 @@ jobs:
         run: |
           TEST_BINARY=$(cargo test --locked --no-run --message-format=json | jq -r 'select(.reason == "compiler-artifact" and .profile.test == true and .target.name == "calmbackup") | .executable')
           test -x "$TEST_BINARY"
-          SCRATCH=$(mktemp -d)
-          docker run --rm --network=none --memory=256m --memory-swap=256m \
+          # /tmp may be tmpfs: payload files there count against the RAM cap.
+          # Require actual disk-backed scratch, as documented for large backups.
+          echo "::notice::Default temporary filesystem: $(stat -f -c %T "${TMPDIR:-/tmp}")"
+          SCRATCH=$(mktemp -d "$GITHUB_WORKSPACE/.calmbackup-memory-XXXXXX")
+          SCRATCH_FS=$(stat -f -c %T "$SCRATCH")
+          echo "::notice::Memory-test scratch filesystem: $SCRATCH_FS"
+          case "$SCRATCH_FS" in tmpfs|ramfs) echo 'Disk-backed scratch is required'; exit 1;; esac
+          set +e
+          docker run --name calmbackup-memory-ci --network=none --memory=256m --memory-swap=256m \
             -v "$TEST_BINARY:/test:ro" -v "$SCRATCH:/scratch" \
             -e CB_MEMORY_TEST_GIB=1 -e CB_MEMORY_TEST_DIR=/scratch \
             ubuntu:24.04 /test core::memory_tests::large_file_pipeline_under_memory_limit \
             --exact --ignored --nocapture
+          RESULT=$?
+          set -e
+          if [ "$RESULT" -ne 0 ]; then
+            DETAIL=$(docker inspect calmbackup-memory-ci --format 'OOMKilled={{.State.OOMKilled}} ExitCode={{.State.ExitCode}}')
+            echo "::error::Streaming test failed: $DETAIL; scratch filesystem=$SCRATCH_FS"
+          fi
+          docker rm calmbackup-memory-ci
+          exit "$RESULT"
 
   release:
     needs: test
