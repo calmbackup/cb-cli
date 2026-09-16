@@ -44,6 +44,7 @@ pub async fn execute() -> Result<()> {
             username: None,
             password: None,
             database: None,
+            databases: Vec::new(),
             path: Some(path),
         }
     } else {
@@ -74,6 +75,7 @@ pub async fn execute() -> Result<()> {
             username: Some(username),
             password: Some(password),
             database: Some(database),
+            databases: Vec::new(),
             path: None,
         }
     };

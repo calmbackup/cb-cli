@@ -8,11 +8,13 @@ pub struct MysqlDumper {
     port: u16,
     username: String,
     password: String,
-    database: String,
+    databases: Vec<String>,
+    multi_database: bool,
 }
 
 impl MysqlDumper {
     pub fn new(config: &DatabaseConfig) -> Result<Self> {
+        config.validate_selection()?;
         let host = config
             .host
             .clone()
@@ -28,40 +30,64 @@ impl MysqlDumper {
             .password
             .clone()
             .ok_or_else(|| AppError::Config("MySQL password is required".to_string()))?;
-        let database = config
-            .database
-            .clone()
-            .ok_or_else(|| AppError::Config("MySQL database is required".to_string()))?;
+        let multi_database = !config.databases.is_empty();
+        let databases = if multi_database {
+            config.databases.clone()
+        } else {
+            vec![config.database.clone().filter(|name| !name.is_empty())
+                .ok_or_else(|| AppError::Config("MySQL database is required".to_string()))?]
+        };
 
         Ok(Self {
             host,
             port,
             username,
             password,
-            database,
+            databases,
+            multi_database,
         })
+    }
+
+    fn dump_command(&self) -> std::process::Command {
+        let mut cmd = self.client_command("mysqldump");
+        cmd.arg("--single-transaction").arg("--routines").arg("--triggers");
+        if self.multi_database {
+            // A single client transaction, not separate sequential dumps.
+            // CREATE DATABASE/USE statements preserve the original schema names.
+            cmd.arg("--events").arg("--databases");
+        }
+        cmd.arg("--").args(&self.databases);
+        cmd
+    }
+
+    fn restore_command(&self) -> std::process::Command {
+        let mut cmd = self.client_command("mysql");
+        cmd.arg("--");
+        if !self.multi_database {
+            cmd.arg(&self.databases[0]);
+        }
+        cmd
+    }
+
+    fn client_command(&self, executable: &str) -> std::process::Command {
+        let mut cmd = std::process::Command::new(executable);
+        cmd.arg(format!("-h{}", self.host))
+            .arg(format!("-P{}", self.port))
+            .arg(format!("-u{}", self.username));
+        if !self.password.is_empty() {
+            cmd.arg(format!("-p{}", self.password));
+        }
+        cmd
     }
 }
 
 impl DatabaseDumper for MysqlDumper {
     fn dump(&self, output_path: &Path) -> Result<()> {
         use std::fs::File;
-        use std::process::Command;
 
         let output_file = File::create(output_path)?;
 
-        let mut cmd = Command::new("mysqldump");
-        cmd.arg("--single-transaction")
-            .arg("--routines")
-            .arg("--triggers")
-            .arg(format!("-h{}", self.host))
-            .arg(format!("-P{}", self.port))
-            .arg(format!("-u{}", self.username));
-        if !self.password.is_empty() {
-            cmd.arg(format!("-p{}", self.password));
-        }
-        let output = cmd
-            .arg(&self.database)
+        let output = self.dump_command()
             .stdout(output_file)
             .output()
             .map_err(|e| AppError::Dump(format!("failed to run mysqldump: {}", e)))?;
@@ -80,19 +106,10 @@ impl DatabaseDumper for MysqlDumper {
 
     fn restore(&self, dump_path: &Path) -> Result<()> {
         use std::fs::File;
-        use std::process::Command;
 
         let input_file = File::open(dump_path)?;
 
-        let mut cmd = Command::new("mysql");
-        cmd.arg(format!("-h{}", self.host))
-            .arg(format!("-P{}", self.port))
-            .arg(format!("-u{}", self.username));
-        if !self.password.is_empty() {
-            cmd.arg(format!("-p{}", self.password));
-        }
-        let output = cmd
-            .arg(&self.database)
+        let output = self.restore_command()
             .stdin(input_file)
             .output()
             .map_err(|e| AppError::Restore(format!("failed to run mysql: {}", e)))?;
@@ -133,6 +150,57 @@ pub fn verify_dump(path: &Path) -> Result<bool> {
 mod tests {
     use super::*;
     use std::io::{Seek, SeekFrom, Write};
+
+    fn configured(selection: &str) -> DatabaseConfig {
+        serde_yaml::from_str(&format!(
+            "driver: mysql\nhost: localhost\nport: 3306\nusername: test\npassword: ''\n{selection}\n"
+        )).unwrap()
+    }
+
+    fn arguments(command: std::process::Command) -> Vec<String> {
+        command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect()
+    }
+
+    #[test]
+    fn legacy_single_database_keeps_target_and_dump_format() {
+        let dumper = MysqlDumper::new(&configured("database: example")).unwrap();
+        let dump = arguments(dumper.dump_command());
+        assert!(dump.contains(&"--single-transaction".into()));
+        assert!(!dump.contains(&"--databases".into()));
+        assert_eq!(&dump[dump.len()-2..], ["--", "example"]);
+        let restore = arguments(dumper.restore_command());
+        assert_eq!(&restore[restore.len()-2..], ["--", "example"]);
+    }
+
+    #[test]
+    fn joint_snapshot_uses_one_transaction_and_explicit_schema_names() {
+        let dumper = MysqlDumper::new(&configured("databases: [bb_api, bb_spine, keycloak]")).unwrap();
+        let dump = arguments(dumper.dump_command());
+        assert_eq!(dump.iter().filter(|arg| *arg == "--single-transaction").count(), 1);
+        assert!(dump.contains(&"--events".into()));
+        assert_eq!(&dump[dump.len()-5..], ["--databases", "--", "bb_api", "bb_spine", "keycloak"]);
+        // USE statements select each original database, not a single forced target.
+        assert_eq!(arguments(dumper.restore_command()), ["-hlocalhost", "-P3306", "-utest", "--"]);
+    }
+
+    #[test]
+    fn invalid_ambiguous_or_duplicate_selection_is_rejected() {
+        for selection in ["database: example\ndatabases: [other]", "databases: ['', example]",
+                          "databases: [example, example]", "databases: [example, EXAMPLE]",
+                          "databases: []", "database: ''"] {
+            assert!(MysqlDumper::new(&configured(selection)).is_err(), "{selection}");
+        }
+        let mut config = configured("databases: [example]");
+        config.driver = "pgsql".into();
+        assert!(config.validate_selection().is_err());
+    }
+
+    #[test]
+    fn database_names_cannot_be_interpreted_as_client_options() {
+        let dumper = MysqlDumper::new(&configured("databases: ['--all-databases', 'a b']")).unwrap();
+        let dump = arguments(dumper.dump_command());
+        assert_eq!(&dump[dump.len()-3..], ["--", "--all-databases", "a b"]);
+    }
 
     #[test]
     fn verifies_binary_dump_and_requires_completion_at_end() {

@@ -25,6 +25,7 @@ async fn restores_sqlite_only_after_checksum_and_authentication_pass() {
         username: None,
         password: None,
         database: None,
+        databases: Vec::new(),
     };
     let dump = dir.path().join("database.sqlite");
     let source_dumper = dumper::new_dumper(&db_config(&source)).unwrap();

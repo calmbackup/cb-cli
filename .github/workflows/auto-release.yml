@@ -25,6 +25,16 @@ jobs:
       - name: Run tests
         run: cargo test --locked
 
+      - name: Install MySQL integration-test client
+        run: sudo apt-get update && sudo apt-get install -y mysql-client
+
+      - name: Check synthetic database launcher safety
+        run: python3 .github/scripts/test_mysql_launcher.py
+
+      - name: Verify coherent multi-database MySQL backup and restore
+        timeout-minutes: 15
+        run: bash .github/scripts/test-mysql-multidb.sh
+
       - name: Verify streaming with a 256 MiB memory ceiling
         run: |
           TEST_BINARY=$(cargo test --locked --no-run --message-format=json | jq -r 'select(.reason == "compiler-artifact" and .profile.test == true and .target.name == "calmbackup") | .executable')

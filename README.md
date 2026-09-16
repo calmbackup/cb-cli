@@ -82,6 +82,43 @@ local_retention_days: 7
 
 ## Usage
 
+### MySQL: one snapshot of multiple databases
+
+Replace `database: "myapp"` with an explicit list in the `database` section:
+
+```yaml
+database:
+  driver: mysql
+  host: "127.0.0.1"
+  port: 3306
+  username: "backup_operator"
+  password: "configure-privately"
+  databases: [bb_api, bb_spine, keycloak]
+```
+
+Do not set both `database` and `databases`. The list is MySQL-only; existing
+single-database configurations remain supported. One `mysqldump` invocation uses
+`--single-transaction --databases`, including routines, triggers and events.
+The result is one encrypted archive, not three independently timed snapshots.
+Transactional consistency requires transactional tables (such as InnoDB) and
+no concurrent schema changes. Coordinate deployment/migration locks separately;
+this CLI option does not stop applications or establish those locks.
+
+Restoring this format uses the dump's **original database names**, including its
+`CREATE DATABASE` and `USE` statements. It does not rename, filter or sandbox the
+SQL to the configured list. Verify the selected archive and restore first to an
+isolated empty MySQL server with the intended privileges. Never point a rehearsal
+at production. Configuration/files, archive keys and application field keys need
+their own recovery copies. A synthetic two-server MySQL 8.0.45 round-trip passed
+for three schemas, Unicode/binary/NULL values, schema defaults/column metadata,
+cross-schema foreign keys, views, routines, triggers and events. A separate
+synthetic concurrent-write test committed transactions across all three schemas
+while dumping 40 MiB of payload: every restored schema had the same transaction
+revision, with all payload rows present. Deployment locking remains the caller's
+responsibility.
+
+### Commands
+
 ```bash
 calmbackup run              # Run a backup
 calmbackup list             # List local and cloud backups
@@ -94,8 +131,9 @@ calmbackup version          # Print version
 
 ```
 --config <path>    Override config file location
---verbose, -v      Verbose output
+--json             Output JSON in CLI mode
 --quiet, -q        Suppress non-error output (useful for cron)
+--no-auto-update   Skip pre-backup self-update (operator-managed upgrades)
 ```
 
 ## Cron
@@ -128,6 +166,14 @@ An unavailable update service or an installation-permission error does not
 prevent the scheduled backup from running. Update checks time out quickly, and
 installation errors are written to stderr/syslog.
 
+The `--no-auto-update` option skips both the update check and binary
+replacement before `run`, for deployments where an operator installs and verifies
+specific releases. Example: `calmbackup --no-auto-update run --config /private/config.yaml`.
+Automatic updates remain enabled by default. This option does not verify the
+installed binary for you and does not disable interactive dashboard update actions;
+operators opting out must arrange reviewed upgrades and security fixes themselves.
+Do not add this flag to an older installed CLI that does not advertise it in help.
+
 ## How it works
 
 1. **Dump** — Runs `mysqldump`, `pg_dump`, or `sqlite3 .backup` depending on your driver
@@ -149,6 +195,24 @@ make test        # Run all tests
 Requires Rust with edition 2024 support, a C compiler, Make and Perl. SQLite and
 OpenSSL are built from vendored sources; released Linux musl binaries do not need
 system OpenSSL. CI builds using the committed Cargo.lock.
+
+### Multi-database release checks
+
+Both release workflows now run the two opt-in MySQL integration tests against
+fresh synthetic MySQL 8.0.45 server pairs. They test schema/value/object recovery
+and snapshot consistency while cross-schema transactions commit concurrently.
+The launcher refuses non-CI hosts; never point these tests at application data.
+
+The launcher's failure/cleanup logic can be tested locally without Docker or
+network access; these tests replace all external commands with synthetic stubs:
+
+```sh
+python3 .github/scripts/test_mysql_launcher.py
+```
+
+These launcher tests are not database integration tests. The existing ignored
+MySQL tests independently require empty servers, distinct verified UUIDs and
+disabled event scheduling before creating any fixture data.
 
 ## Large backups and memory
 

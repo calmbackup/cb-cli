@@ -42,6 +42,19 @@ jobs:
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: cargo test --locked
 
+      - name: Install MySQL integration-test client
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y mysql-client
+
+      - name: Check synthetic database launcher safety
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: python3 .github/scripts/test_mysql_launcher.py
+
+      - name: Verify coherent multi-database MySQL backup and restore
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        timeout-minutes: 15
+        run: bash .github/scripts/test-mysql-multidb.sh
+
       - name: Build
         run: |
           if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then

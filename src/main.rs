@@ -25,6 +25,10 @@ struct Cli {
     #[arg(long, short, global = true)]
     quiet: bool,
 
+    /// Skip the automatic update check before `run` (operator-managed upgrades)
+    #[arg(long, global = true)]
+    no_auto_update: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -61,6 +65,10 @@ enum Commands {
     Version,
 }
 
+fn should_auto_update(cli: &Cli, version: &str) -> bool {
+    matches!(&cli.command, Some(Commands::Run)) && version != "dev" && !cli.no_auto_update
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -70,7 +78,7 @@ async fn main() -> anyhow::Result<()> {
     // Cron and other non-interactive users must receive reliability fixes too.
     // Update before opening the database, then replace this process so the
     // pending backup is performed by the newly installed binary.
-    if matches!(&cli.command, Some(Commands::Run)) && VERSION != "dev" {
+    if should_auto_update(&cli, VERSION) {
         match core::updater::check(VERSION).await {
             Ok((tag, true)) => {
                 if mode == cli::output::OutputMode::Styled {
@@ -163,4 +171,41 @@ fn restart_after_update() -> anyhow::Result<()> {
 #[cfg(not(unix))]
 fn restart_after_update() -> anyhow::Result<()> {
     anyhow::bail!("CalmBackup was updated; rerun the command to use the new version")
+}
+
+#[cfg(test)]
+mod update_policy_tests {
+    use super::*;
+
+    #[test]
+    fn ordinary_backup_keeps_automatic_updates() {
+        let cli = Cli::try_parse_from(["calmbackup", "run"]).unwrap();
+        assert!(should_auto_update(&cli, "2.0.11"));
+        assert!(!should_auto_update(&cli, "dev"));
+    }
+
+    #[test]
+    fn managed_backup_can_opt_out_before_or_after_subcommand() {
+        for args in [
+            ["calmbackup", "--no-auto-update", "run"],
+            ["calmbackup", "run", "--no-auto-update"],
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+            assert!(!should_auto_update(&cli, "2.0.11"));
+        }
+    }
+
+    #[test]
+    fn other_commands_do_not_gain_automatic_updates() {
+        for args in [
+            vec!["calmbackup"],
+            vec!["calmbackup", "list"],
+            vec!["calmbackup", "status"],
+            vec!["calmbackup", "version"],
+            vec!["calmbackup", "restore", "--latest"],
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+            assert!(!should_auto_update(&cli, "2.0.11"));
+        }
+    }
 }

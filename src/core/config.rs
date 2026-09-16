@@ -25,7 +25,33 @@ pub struct DatabaseConfig {
     pub username: Option<String>,
     pub password: Option<String>,
     pub database: Option<String>,
+    /// MySQL only: one dump transaction spanning these explicitly named schemas.
+    /// Mutually exclusive with the legacy single `database` setting.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub databases: Vec<String>,
     pub path: Option<String>,
+}
+
+impl DatabaseConfig {
+    pub fn validate_selection(&self) -> Result<()> {
+        if self.databases.is_empty() {
+            return Ok(());
+        }
+        if self.driver != "mysql" || self.database.is_some() {
+            return Err(AppError::Config(
+                "databases is MySQL-only and cannot be combined with database".into(),
+            ));
+        }
+        let mut seen = std::collections::HashSet::new();
+        for name in &self.databases {
+            if name.is_empty() || name.chars().count() > 64 || name.contains('\0')
+                || !seen.insert(name.to_lowercase())
+            {
+                return Err(AppError::Config("Invalid or duplicate MySQL database name".into()));
+            }
+        }
+        Ok(())
+    }
 }
 
 fn default_api_url() -> String {
@@ -134,6 +160,7 @@ impl Config {
                 self.database.driver
             )));
         }
+        self.database.validate_selection()?;
         Ok(())
     }
 }

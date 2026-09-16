@@ -16,3 +16,6 @@ mod memory_tests;
 
 #[cfg(test)]
 mod restore_tests;
+
+#[cfg(test)]
+mod mysql_restore_tests;
