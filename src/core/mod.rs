@@ -10,6 +10,7 @@ mod staging;
 pub mod types;
 pub mod updater;
 pub mod upload;
+pub mod upload_existing;
 
 #[cfg(test)]
 mod memory_tests;

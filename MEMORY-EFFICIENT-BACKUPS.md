@@ -105,6 +105,13 @@ downloads it over a bounded-buffer loopback server, verifies both transfer
 checksums, decrypts, and compares every original/recovered plaintext byte.
 It never calls CalmBackup's cloud service or any database server.
 
+The staged archive-only retry also runs inside this stress test: a bounded-buffer
+loopback service checks metadata requests, hashes every uploaded byte, confirms
+the record and supplies matching metadata. This exercises the additional private
+encrypted snapshot and complete key-authentication pass. Set `TMPDIR` to the same
+disk-backed scratch directory so that this snapshot cannot land on a RAM filesystem.
+Passing it does not prove that the production cloud transport failure is repaired.
+
 Compile first outside the memory ceiling, then run the compiled test binary in
 a container. Example for a binary built on Ubuntu 24.04 (requires `jq` and Docker):
 
@@ -115,7 +122,7 @@ SCRATCH=$(mktemp -d "$(pwd)/.calmbackup-memory-XXXXXX")
 case "$(stat -f -c %T "$SCRATCH")" in tmpfs|ramfs) echo 'Disk-backed scratch is required'; exit 1;; esac
 docker run --rm --network=none --memory=256m --memory-swap=256m \
   -v "$TEST_BINARY:/test:ro" -v "$SCRATCH:/scratch" \
-  -e CB_MEMORY_TEST_GIB=1 -e CB_MEMORY_TEST_DIR=/scratch \
+  -e TMPDIR=/scratch -e CB_MEMORY_TEST_GIB=1 -e CB_MEMORY_TEST_DIR=/scratch \
   ubuntu:24.04 /test core::memory_tests::large_file_pipeline_under_memory_limit \
   --exact --ignored --nocapture
 ```
@@ -178,6 +185,17 @@ The dedicated tag-release workflow's previously inactive test condition is fixed
 - The tagged source's 72 regular tests passed again locally. Its separate 1-GiB
   memory test also passed without the periodic observer under 256 MiB/no swap:
   79.10 seconds, 16,016 KiB process peak RSS. This does not erase the CI caveat.
+
+### Archive-only retry validation on 17 September 2026 (release pending)
+
+The extended 3-GiB test passed under a kernel-verified 256-MiB memory limit,
+zero additional swap and two CPUs, with external networking disabled. It processed
+3,221,225,509 plaintext bytes and 3,221,225,539 encrypted bytes, exercised the
+archive-only retry API flow, then downloaded, authenticated, decrypted and compared
+every byte. Exit status 0, no OOM kill; duration 378.78 seconds and process peak
+RSS 18,120 KiB. Kernel page-cache accounting is separate from process RSS;
+memory.events showed reclaim at the configured limit but zero OOM events.
+This is a synthetic local test, not proof of a repaired production cloud upload.
 
 ### Publishing
 

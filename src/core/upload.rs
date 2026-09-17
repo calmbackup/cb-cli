@@ -5,6 +5,28 @@ use crate::core::types::{AppError, Result};
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 
+/// Report categories only: error source text may contain signed URLs or secrets.
+fn transport_diagnostic(error: &reqwest::Error) -> String {
+    let mut io_kind = None;
+    let mut source = std::error::Error::source(error);
+    for _ in 0..16 {
+        let Some(current) = source else { break };
+        if let Some(io) = current.downcast_ref::<std::io::Error>() {
+            io_kind = Some(io.kind());
+        }
+        source = current.source();
+    }
+    format!(
+        "timeout={}, connect={}, request={}, body={}, decode={}, io_kind={:?}",
+        error.is_timeout(),
+        error.is_connect(),
+        error.is_request(),
+        error.is_body(),
+        error.is_decode(),
+        io_kind
+    )
+}
+
 /// Upload an encrypted backup file to a presigned URL via HTTP PUT.
 pub async fn upload(file_path: &Path, presigned_url: &str) -> Result<()> {
     let file = tokio::fs::File::open(file_path)
@@ -26,7 +48,12 @@ pub async fn upload(file_path: &Path, presigned_url: &str) -> Result<()> {
         .body(body)
         .send()
         .await
-        .map_err(|e| AppError::Upload(format!("upload request failed: {}", e.without_url())))?;
+        .map_err(|e| {
+            AppError::Upload(format!(
+                "upload request failed: {}",
+                transport_diagnostic(&e)
+            ))
+        })?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -79,6 +106,42 @@ mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpListener;
+
+    #[tokio::test]
+    async fn transport_diagnostic_reports_timeout_without_signed_url() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!(
+            "http://{}/secret-path?signature=secret-value",
+            listener.local_addr().unwrap()
+        );
+        // Keep the listener open but send no response: deterministic local timeout.
+        let error = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(std::time::Duration::from_millis(50))
+            .build()
+            .unwrap()
+            .get(&url)
+            .send()
+            .await
+            .unwrap_err();
+        let detail = transport_diagnostic(&error);
+        assert!(detail.contains("timeout=true"));
+        assert!(!detail.contains("secret"));
+        assert!(!detail.contains("127.0.0.1"));
+        drop(listener);
+    }
+
+    #[tokio::test]
+    async fn upload_reports_transport_categories_without_signed_url() {
+        let (url, thread) = server(b"");
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let error = upload(file.path(), &url).await.unwrap_err().to_string();
+        assert!(error.contains("upload request failed: timeout="));
+        assert!(error.contains("io_kind="));
+        assert!(!error.contains("signature"));
+        assert!(!error.contains("127.0.0.1"));
+        thread.join().unwrap();
+    }
 
     fn server(reply: &'static [u8]) -> (String, std::thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();

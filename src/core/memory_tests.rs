@@ -1,6 +1,6 @@
 //! Opt-in real file/HTTP test. Run the compiled test executable in a memory-
 //! limited container; compiling under the same tiny limit is not the test.
-use super::{crypto, dumper::mysql, upload};
+use super::{api::ApiClient, crypto, dumper::mysql, upload, upload_existing};
 use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -67,7 +67,7 @@ async fn large_file_pipeline_under_memory_limit() {
         Err(_) => tempfile::tempdir().unwrap(),
     };
     let input = dir.path().join("input");
-    let encrypted = dir.path().join("encrypted");
+    let encrypted = dir.path().join("backup-20260917-010000.tar.gz.enc");
     let downloaded = dir.path().join("downloaded");
     let restored = dir.path().join("restored");
     let mut file = File::create(&input).unwrap();
@@ -104,6 +104,10 @@ async fn large_file_pipeline_under_memory_limit() {
     memory_snapshot("before checksum and authentication");
     let checksum = crypto::checksum(&encrypted).unwrap();
     assert!(crypto::verify_key(&encrypted, &key).unwrap());
+
+    println!("Authenticating and retrying retained archive through the full upload API flow");
+    exercise_archive_retry(&encrypted, &key, &checksum).await;
+    memory_snapshot("after archive-only retry");
 
     // The loopback server also uses bounded buffers and never stores the PUT in
     // RAM. A SHA-256 verifies every uploaded byte, not only the byte count.
@@ -202,4 +206,86 @@ async fn large_file_pipeline_under_memory_limit() {
         thread.join().unwrap();
     }
     // TempDir cleans only this test's exclusively generated files.
+}
+
+async fn exercise_archive_retry(path: &std::path::Path, key: &[u8; 32], checksum: &str) {
+    let size = std::fs::metadata(path).unwrap().len();
+    let filename = path.file_name().unwrap().to_str().unwrap().to_string();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let api = ApiClient::new("synthetic-memory-test", &url, "test");
+    let expected = checksum.to_string();
+    let metadata = serde_json::json!({"id":"bk_memory", "filename":filename,
+        "size":size, "checksum":checksum, "created_at":"2026-09-17T01:00:00Z"});
+    let server = std::thread::spawn(move || {
+        let responses = [
+            (
+                "GET /backups?page=1&per_page=50",
+                serde_json::json!({"data":[]}),
+            ),
+            (
+                "POST /upload-url",
+                serde_json::json!({"backup_id":"bk_memory", "upload_url":format!("{url}/object")}),
+            ),
+            ("PUT /object", serde_json::json!({})),
+            ("POST /backups/bk_memory/confirm", serde_json::json!({})),
+            ("GET /backups/bk_memory", metadata.clone()),
+        ];
+        for (request, response) in responses {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(std::time::Duration::from_secs(300)))
+                .unwrap();
+            socket
+                .set_write_timeout(Some(std::time::Duration::from_secs(300)))
+                .unwrap();
+            let mut reader = BufReader::new(socket.try_clone().unwrap());
+            let mut first = String::new();
+            reader.read_line(&mut first).unwrap();
+            assert_eq!(first.trim_end(), format!("{request} HTTP/1.1"));
+            let mut length = 0u64;
+            loop {
+                let mut line = String::new();
+                assert!(reader.read_line(&mut line).unwrap() > 0);
+                if line == "\r\n" {
+                    break;
+                }
+                if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    length = value.trim().parse().unwrap();
+                }
+            }
+            if request == "PUT /object" {
+                assert_eq!(length, size);
+                let mut left = length;
+                let mut buffer = [0; 65536];
+                let mut hash = Sha256::new();
+                while left > 0 {
+                    let take = left.min(buffer.len() as u64) as usize;
+                    reader.read_exact(&mut buffer[..take]).unwrap();
+                    hash.update(&buffer[..take]);
+                    left -= take as u64;
+                }
+                assert_eq!(hex::encode(hash.finalize()), expected);
+            } else if length > 0 {
+                assert!(length < 8192);
+                let mut body = vec![0; length as usize];
+                reader.read_exact(&mut body).unwrap();
+                let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(body["size"], metadata["size"]);
+                assert_eq!(body["checksum"], metadata["checksum"]);
+            }
+            let response = response.to_string();
+            write!(socket,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",response.len()).unwrap();
+        }
+    });
+    let receipt = upload_existing::execute(&api, path, checksum, key, "mysql")
+        .await
+        .unwrap();
+    server.join().unwrap();
+    assert_eq!(receipt.checksum, checksum);
+    assert_eq!(receipt.size, size);
+    assert!(receipt.archive_key_authenticated);
+    assert!(!receipt.already_confirmed);
+    assert!(!receipt.restoration_verified);
+    assert_eq!(crypto::checksum(path).unwrap(), checksum);
 }

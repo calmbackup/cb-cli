@@ -5,3 +5,4 @@ pub mod restore;
 pub mod run;
 pub mod status;
 pub mod version;
+pub mod upload;

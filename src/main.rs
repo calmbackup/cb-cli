@@ -38,6 +38,14 @@ enum Commands {
     /// Run a backup now
     Run,
 
+    /// Upload one retained encrypted archive without creating a database dump
+    Upload {
+        archive: std::path::PathBuf,
+        /// Expected lowercase SHA-256 of the encrypted archive (required)
+        #[arg(long)]
+        sha256: String,
+    },
+
     /// Restore a backup
     Restore {
         /// Backup ID to restore (optional)
@@ -131,6 +139,9 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Run) => {
             cli::run::execute(config_path, mode).await?;
         }
+        Some(Commands::Upload { archive, sha256 }) => {
+            cli::upload::execute(config_path, &archive, &sha256, mode).await?;
+        }
         Some(Commands::Restore {
             backup_id,
             latest,
@@ -203,9 +214,16 @@ mod update_policy_tests {
             vec!["calmbackup", "status"],
             vec!["calmbackup", "version"],
             vec!["calmbackup", "restore", "--latest"],
+            vec!["calmbackup", "upload", "backup-20260917-010000.tar.gz.enc", "--sha256", "placeholder"],
         ] {
             let cli = Cli::try_parse_from(args).unwrap();
             assert!(!should_auto_update(&cli, "2.0.11"));
         }
+    }
+
+    #[test]
+    fn archive_upload_requires_explicit_file_and_checksum() {
+        assert!(Cli::try_parse_from(["calmbackup", "upload"]).is_err());
+        assert!(Cli::try_parse_from(["calmbackup", "upload", "backup.tar.gz.enc"]).is_err());
     }
 }

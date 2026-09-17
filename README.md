@@ -127,6 +127,34 @@ calmbackup restore <id>     # Restore a backup by ID
 calmbackup version          # Print version
 ```
 
+### Retry a retained archive (unreleased)
+
+The staged `upload` command retries one encrypted archive without connecting to
+the database, exporting data again, pruning backups, or automatically retrying
+HTTP requests. It is not available in released v2.0.12 yet.
+
+```bash
+calmbackup --config /private/calmbackup.json --json upload \
+  /private/backup-20260917-010000.tar.gz.enc --sha256 <recorded-sha256>
+```
+
+Use the configuration for the intended cloud account and the archive's original
+encryption key. The checksum must be a previously checked lowercase SHA-256, not
+a value accepted blindly from an untrusted file. The command creates an
+owner-only **encrypted** temporary snapshot (set `TMPDIR` to private disk-backed
+storage and allow free space equal to the archive size), checks its checksum and authenticates the entire archive
+before making cloud requests. It never writes decrypted data.
+
+All confirmed-backup pages are checked. An exact existing match is returned
+without reuploading; duplicate identities, repeated pages or conflicting metadata
+fail closed. A new upload is confirmed and checked again through the metadata API.
+The JSON receipt deliberately reports `restoration_verified: false`: download,
+decryption and an isolated restore are still required. Pending uploads are not
+visible in the confirmed-backup API; a failed attempt may leave a pending cloud
+record. Do not manually confirm that record or mark an earlier failed run successful.
+The original local archive is retained on both success and failure. This command
+does not self-update, and it does not fix an underlying transport problem.
+
 ### Flags
 
 ```
